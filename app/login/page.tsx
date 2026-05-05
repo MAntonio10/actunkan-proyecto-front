@@ -27,7 +27,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { LogoActunKan } from "@/componentes/logo_actun_kan";
+import Image from "next/image";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { type RolUsuario } from "@/tipos";
 import Link from "next/link";
@@ -123,21 +123,72 @@ export default function AutenticacionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      {/* Fondo decorativo */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+    <div className="relative min-h-screen flex flex-col items-center justify-center p-4 overflow-hidden">
+      {/* Fondo decorativo: blobs organicos + viñeta calida */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          backgroundImage: `
+            radial-gradient(ellipse 60% 50% at 15% 10%, color-mix(in oklch, var(--primary) 22%, transparent), transparent 65%),
+            radial-gradient(ellipse 55% 50% at 90% 95%, color-mix(in oklch, var(--accent) 28%, transparent), transparent 65%),
+            radial-gradient(ellipse 80% 60% at 50% 50%, color-mix(in oklch, var(--background) 80%, transparent), transparent 80%)
+          `,
+        }}
+      />
+      {/* Curva decorativa inferior */}
+      <svg
+        aria-hidden
+        className="pointer-events-none absolute -bottom-24 left-1/2 -z-10 h-[420px] w-[150%] -translate-x-1/2 opacity-40"
+        viewBox="0 0 1200 400"
+        preserveAspectRatio="none"
+      >
+        <path
+          d="M0,260 C300,360 500,180 720,220 C940,260 1080,340 1200,300 L1200,400 L0,400 Z"
+          fill="color-mix(in oklch, var(--primary) 18%, transparent)"
+        />
+        <path
+          d="M0,320 C260,380 540,260 760,300 C980,340 1100,360 1200,340 L1200,400 L0,400 Z"
+          fill="color-mix(in oklch, var(--accent) 22%, transparent)"
+        />
+      </svg>
 
       <div className="relative z-10 w-full max-w-md space-y-6">
-        {/* Logo y titulo */}
-        <div className="text-center space-y-2">
-          <LogoActunKan className="h-16 w-16 mx-auto text-primary" />
-          <h1 className="text-2xl font-bold">PARQUE NACIONAL</h1>
-          <p className="text-primary font-semibold tracking-wider">ACTUN KAN</p>
+        {/* Logo y titulo: medallon con anillo y resplandor */}
+        <div className="text-center space-y-3">
+          <div className="relative mx-auto w-fit">
+            <div
+              aria-hidden
+              className="absolute inset-0 -m-2 rounded-full blur-2xl"
+              style={{
+                background:
+                  "radial-gradient(circle, color-mix(in oklch, var(--primary) 35%, transparent), transparent 70%)",
+              }}
+            />
+            <div className="relative rounded-full bg-card/90 p-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10 backdrop-blur">
+              <Image
+                src="/Propeten.png"
+                alt="ProPeten"
+                width={120}
+                height={120}
+                priority
+                className="h-19 w-19 object-contain"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium uppercase tracking-[0.35em] text-muted-foreground">
+              Parque Nacional
+            </p>
+            <h1 className="text-xl font-medium uppercase tracking-[0.35em] text-muted-foreground">
+              ACTUN KAN
+            </h1>
+          </div>
         </div>
 
         {/* Formulario de login */}
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-          <CardHeader className="text-center pb-2">
+        <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+          <CardHeader className="text-center pb-2 pt-6">
             <CardTitle className="flex items-center justify-center gap-2 text-lg">
               <Shield className="h-5 w-5 text-primary" />
               Iniciar Sesion
@@ -245,7 +296,7 @@ export default function AutenticacionPage() {
               {/* Boton de envio */}
               <Button
                 type="submit"
-                className="w-full h-12 text-base font-semibold bg-primary hover:bg-primary/90"
+                className="w-full h-12 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary via-primary to-accent shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:brightness-105"
                 disabled={enviando}
               >
                 {enviando ? (
@@ -276,19 +327,27 @@ export default function AutenticacionPage() {
         </div>
 
         {/* Credenciales demo */}
-        <Card className="bg-muted/30 border-dashed border-border/50">
+        <Card className="border-dashed border-accent/40 bg-accent/10 backdrop-blur-sm">
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground text-center mb-2">
-              Credenciales de prueba:
+            <p className="text-[11px] uppercase tracking-wider text-accent-foreground/80 text-center mb-2 font-semibold">
+              Credenciales de prueba
             </p>
             <div className="text-xs text-center space-y-1">
               <p>
-                <span className="text-foreground font-medium">luis.ramos</span>{" "}
-                / 1234 (Taquillero)
+                <span className="font-mono font-semibold text-foreground">
+                  luis.ramos
+                </span>{" "}
+                <span className="text-muted-foreground">/</span>{" "}
+                <span className="font-mono">1234</span>{" "}
+                <span className="text-muted-foreground">(Taquillero)</span>
               </p>
               <p>
-                <span className="text-foreground font-medium">admin</span> /
-                admin (Administrador)
+                <span className="font-mono font-semibold text-foreground">
+                  admin
+                </span>{" "}
+                <span className="text-muted-foreground">/</span>{" "}
+                <span className="font-mono">admin</span>{" "}
+                <span className="text-muted-foreground">(Administrador)</span>
               </p>
             </div>
           </CardContent>

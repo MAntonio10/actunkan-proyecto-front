@@ -3,41 +3,41 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* ActunKan Ecological Park - Forest Green Theme */
+/* ActunKan Ecological Park - Light Green & Brown Nature Theme */
 :root {
-  --background: oklch(0.98 0.005 155);
-  --foreground: oklch(0.15 0.02 155);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.02 155);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.02 155);
-  --primary: oklch(0.35 0.1 155);
-  --primary-foreground: oklch(0.98 0.005 155);
-  --secondary: oklch(0.95 0.01 155);
-  --secondary-foreground: oklch(0.25 0.05 155);
-  --muted: oklch(0.95 0.01 155);
-  --muted-foreground: oklch(0.45 0.02 155);
-  --accent: oklch(0.72 0.15 175);
-  --accent-foreground: oklch(0.15 0.02 155);
+  --background: oklch(0.97 0.012 95);
+  --foreground: oklch(0.24 0.04 110);
+  --card: oklch(0.99 0.008 95);
+  --card-foreground: oklch(0.24 0.04 110);
+  --popover: oklch(0.99 0.008 95);
+  --popover-foreground: oklch(0.24 0.04 110);
+  --primary: oklch(0.48 0.12 145);
+  --primary-foreground: oklch(0.98 0.008 95);
+  --secondary: oklch(0.92 0.025 85);
+  --secondary-foreground: oklch(0.30 0.05 110);
+  --muted: oklch(0.93 0.018 90);
+  --muted-foreground: oklch(0.46 0.04 105);
+  --accent: oklch(0.66 0.10 75);
+  --accent-foreground: oklch(0.22 0.04 80);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.88 0.02 155);
-  --input: oklch(0.92 0.01 155);
-  --ring: oklch(0.5 0.12 165);
-  --chart-1: oklch(0.5 0.15 155);
-  --chart-2: oklch(0.65 0.12 175);
-  --chart-3: oklch(0.55 0.08 185);
-  --chart-4: oklch(0.7 0.1 165);
-  --chart-5: oklch(0.45 0.1 145);
+  --border: oklch(0.86 0.025 90);
+  --input: oklch(0.91 0.02 90);
+  --ring: oklch(0.55 0.13 145);
+  --chart-1: oklch(0.55 0.14 145);
+  --chart-2: oklch(0.65 0.12 95);
+  --chart-3: oklch(0.60 0.10 75);
+  --chart-4: oklch(0.70 0.08 130);
+  --chart-5: oklch(0.50 0.10 105);
   --radius: 0.625rem;
-  --sidebar: oklch(0.98 0.005 155);
-  --sidebar-foreground: oklch(0.15 0.02 155);
-  --sidebar-primary: oklch(0.35 0.1 155);
-  --sidebar-primary-foreground: oklch(0.98 0.005 155);
-  --sidebar-accent: oklch(0.92 0.02 155);
-  --sidebar-accent-foreground: oklch(0.25 0.05 155);
-  --sidebar-border: oklch(0.88 0.02 155);
-  --sidebar-ring: oklch(0.5 0.12 165);
+  --sidebar: oklch(0.95 0.018 90);
+  --sidebar-foreground: oklch(0.24 0.04 110);
+  --sidebar-primary: oklch(0.48 0.12 145);
+  --sidebar-primary-foreground: oklch(0.98 0.008 95);
+  --sidebar-accent: oklch(0.90 0.03 85);
+  --sidebar-accent-foreground: oklch(0.30 0.05 110);
+  --sidebar-border: oklch(0.86 0.025 90);
+  --sidebar-ring: oklch(0.55 0.13 145);
 }
 
 .dark {
@@ -121,6 +121,114 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background-color: var(--background);
+    /* Capa 1: bruma verde arriba-izquierda. Capa 2: calidez café abajo-derecha.
+       Capa 3: patron de hojas SVG muy tenue para textura organica. */
+    background-image:
+      radial-gradient(
+        ellipse 70% 55% at 12% 0%,
+        color-mix(in oklch, var(--primary) 14%, transparent) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 65% 60% at 100% 100%,
+        color-mix(in oklch, var(--accent) 16%, transparent) 0%,
+        transparent 65%
+      ),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='%235a8557' stroke-opacity='0.07' stroke-width='1.2'><path d='M30 90 Q40 60 60 50 Q80 40 95 25'/><path d='M55 50 Q60 55 60 65'/><path d='M70 45 Q72 52 73 60'/><path d='M82 35 Q85 42 88 48'/><path d='M30 90 Q35 95 45 95'/></g></svg>");
+    background-attachment: fixed;
+    background-size: auto, auto, 220px 220px;
+    background-repeat: no-repeat, no-repeat, repeat;
+  }
+}
+
+@layer base {
+  /* Polish global para todas las cartas (shadcn). Gradiente sutil + sombra calida. */
+  [data-slot="card"] {
+    background-image: linear-gradient(
+      180deg,
+      var(--card) 0%,
+      color-mix(in oklch, var(--secondary) 18%, var(--card)) 100%
+    );
+    box-shadow:
+      0 1px 0 0 color-mix(in oklch, var(--background) 100%, transparent) inset,
+      0 6px 18px -12px color-mix(in oklch, var(--foreground) 30%, transparent),
+      0 2px 6px -3px color-mix(in oklch, var(--accent) 16%, transparent);
+  }
+}
+
+@layer components {
+  /* Carta con presencia: leve gradiente y sombra calida */
+  .card-realzada {
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--card) 100%, transparent),
+      color-mix(in oklch, var(--secondary) 35%, var(--card))
+    );
+    box-shadow:
+      0 1px 0 0 color-mix(in oklch, var(--primary) 18%, transparent) inset,
+      0 12px 30px -18px color-mix(in oklch, var(--foreground) 45%, transparent),
+      0 4px 12px -8px color-mix(in oklch, var(--accent) 25%, transparent);
+  }
+
+  /* Barra de acento decorativa en la parte superior de una carta */
+  .acento-superior {
+    position: relative;
+  }
+  .acento-superior::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4px;
+    border-top-left-radius: inherit;
+    border-top-right-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      var(--primary) 0%,
+      var(--ring) 45%,
+      var(--accent) 100%
+    );
+  }
+
+  /* Encabezado de pagina con barra lateral de acento */
+  .titulo-seccion {
+    position: relative;
+    padding-left: 0.875rem;
+  }
+  .titulo-seccion::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.35rem;
+    bottom: 0.35rem;
+    width: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      180deg,
+      var(--primary) 0%,
+      var(--accent) 100%
+    );
+  }
+
+  /* "Chip" de subtitulo */
+  .chip-acento {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--primary);
+    background: color-mix(in oklch, var(--primary) 12%, transparent);
+    border: 1px solid color-mix(in oklch, var(--primary) 28%, transparent);
+  }
+  .chip-acento.calido {
+    color: var(--accent-foreground);
+    background: color-mix(in oklch, var(--accent) 22%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
   }
 }

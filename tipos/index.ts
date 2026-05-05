@@ -316,6 +316,27 @@ export const TIPOS_RECORRIDO: { valor: TipoRecorrido; etiqueta: string; descripc
   { valor: 'largo', etiqueta: 'Recorrido Largo', descripcion: 'Aproximadamente 2 horas' },
 ]
 
+// Origen y categoria del visitante (definen el precio del ticket)
+export type OrigenVisitante = 'nacional' | 'extranjero'
+export type CategoriaVisitante = 'adulto' | 'nino' | 'centro_educativo'
+
+export const ORIGENES_VISITANTE: { valor: OrigenVisitante; etiqueta: string }[] = [
+  { valor: 'nacional', etiqueta: 'Nacional' },
+  { valor: 'extranjero', etiqueta: 'Extranjero' },
+]
+
+export const CATEGORIAS_VISITANTE: { valor: CategoriaVisitante; etiqueta: string; descripcion: string }[] = [
+  { valor: 'adulto', etiqueta: 'Adulto', descripcion: 'Mayor de edad' },
+  { valor: 'nino', etiqueta: 'Nino', descripcion: 'Menor de edad' },
+  { valor: 'centro_educativo', etiqueta: 'Centro Educativo', descripcion: 'Nivel primario' },
+]
+
+// Precio en Quetzales por persona segun origen + categoria
+export const PRECIOS_VISITANTE: Record<OrigenVisitante, Record<CategoriaVisitante, number>> = {
+  nacional: { adulto: 20, nino: 10, centro_educativo: 5 },
+  extranjero: { adulto: 25, nino: 25, centro_educativo: 5 },
+}
+
 export const TIPOS_ACCESO: TipoAcceso[] = [
   { id: '1', nombre: 'Entrada General', precio: 15, precio_extranjero: 25, descripcion: 'Acceso general al parque', duracion_horas: 4 },
   { id: '2', nombre: 'Entrada Estudiante', precio: 10, precio_extranjero: 15, descripcion: 'Con carnet de estudiante', duracion_horas: 4 },

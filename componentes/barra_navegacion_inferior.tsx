@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import {
   Home,
-  ScanLine,
   ClipboardList,
   BarChart3,
   ChevronUp,
@@ -32,12 +32,6 @@ const ITEMS_PRINCIPALES: ItemNav[] = [
     icono: <Home className="h-5 w-5" />,
     ruta: "/registro-visitantes",
   },
-  // {
-  //   id: 'control',
-  //   nombre: 'Control',
-  //   icono: <ScanLine className="h-5 w-5" />,
-  //   ruta: '/control-acceso',
-  // },
   {
     id: "actividades",
     nombre: "Actividades",
@@ -76,8 +70,7 @@ const ITEMS_SECUNDARIOS: ItemNav[] = [
   },
 ];
 
-// iOS-like spring ease curve
-const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+const SPRING_SUAVE = { type: "spring" as const, stiffness: 380, damping: 32 };
 
 export function BarraNavegacionInferior() {
   const pathname = usePathname();
@@ -97,164 +90,166 @@ export function BarraNavegacionInferior() {
     estaActivo(i.ruta),
   );
 
-  // Estilos compartidos para TODOS los items (principales y secundarios)
-  // de modo que tengan el mismo tamano y apariencia
+  // Estilos base compartidos por TODOS los items
   const itemBaseClass =
-    "flex flex-col items-center justify-center gap-0.5 rounded-2xl py-2 px-1 " +
+    "relative flex flex-col items-center justify-center gap-0.5 rounded-2xl py-2 px-1 " +
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
-  const itemColorClass = (activo: boolean) =>
-    activo
-      ? "bg-primary/15 text-primary"
-      : "text-muted-foreground hover:text-foreground";
+  // Renderiza un item con pill animada por layoutId
+  const renderItem = (item: ItemNav, isSecondary = false) => {
+    const activo = estaActivo(item.ruta);
+    return (
+      <motion.div
+        key={item.id}
+        whileTap={{ scale: 0.9 }}
+        transition={SPRING_SUAVE}
+        style={isSecondary && item.col ? { gridColumn: item.col } : undefined}
+      >
+        <Link
+          href={item.ruta}
+          aria-current={activo ? "page" : undefined}
+          className={cn(
+            itemBaseClass,
+            "w-full",
+            activo ? "text-primary" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {activo && (
+            <motion.span
+              layoutId="nav-pill-activa"
+              className="absolute inset-0 -z-0 rounded-2xl bg-primary/15"
+              transition={SPRING_SUAVE}
+            />
+          )}
+          <span className="relative z-10">{item.icono}</span>
+          <span className="relative z-10 text-[10px] font-medium leading-tight">
+            {item.nombre}
+          </span>
+        </Link>
+      </motion.div>
+    );
+  };
 
   return (
-    <>
+    <LayoutGroup id="navbar-inferior">
       {/* Spacer para que el contenido no quede oculto detras de la barra */}
       <div aria-hidden className="h-24 md:hidden" />
 
-      {/* Backdrop transparente - solo captura clicks para cerrar, sin blur ni oscurecer */}
-      <button
-        type="button"
-        aria-label="Cerrar menu expandido"
-        onClick={() => setExpandido(false)}
-        tabIndex={expandido ? 0 : -1}
-        className={cn(
-          "fixed inset-0 z-30 md:hidden",
-          expandido ? "pointer-events-auto" : "pointer-events-none",
+      {/* Backdrop transparente — captura clicks para cerrar */}
+      <AnimatePresence>
+        {expandido && (
+          <motion.button
+            type="button"
+            aria-label="Cerrar menu expandido"
+            onClick={() => setExpandido(false)}
+            className="fixed inset-0 z-30 md:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          />
         )}
-      />
+      </AnimatePresence>
 
       <nav
         aria-label="Navegacion principal"
         className="fixed bottom-3 left-3 right-3 z-40 md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        <div
+        <motion.div
+          layout
+          transition={SPRING_SUAVE}
           className={cn(
             "mx-auto max-w-md overflow-hidden border border-border/60",
             "bg-background/85 backdrop-blur-xl",
             "shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)]",
-            // La barra va de redondeada pill a redondeada panel
             expandido ? "rounded-[28px]" : "rounded-[32px]",
           )}
-          style={{
-            transitionProperty: "border-radius",
-            transitionDuration: "400ms",
-            transitionTimingFunction: EASE,
-          }}
         >
           {/* Panel expandible de modulos secundarios */}
-          <div
-            aria-hidden={!expandido}
-            className={cn(
-              "grid",
-              expandido ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-            )}
-            style={{
-              transitionProperty: "grid-template-rows",
-              transitionDuration: "400ms",
-              transitionTimingFunction: EASE,
-            }}
-          >
-            <div className="overflow-hidden">
-              <div
-                className={cn(
-                  "pt-3 px-1.5 pb-0",
-                  // Transicion de entrada del contenido: fade + slide sutil
-                  expandido
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 -translate-y-2",
-                )}
-                style={{
-                  transitionProperty: "opacity, transform",
-                  transitionDuration: "350ms",
-                  transitionTimingFunction: EASE,
-                  transitionDelay: expandido ? "80ms" : "0ms",
+          <AnimatePresence initial={false}>
+            {expandido && (
+              <motion.div
+                key="panel-secundario"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{
+                  height: { type: "spring", stiffness: 400, damping: 38 },
+                  opacity: { duration: 0.18 },
                 }}
+                className="overflow-hidden"
               >
-                {/* Misma grid de 5 columnas que la barra principal para que
-                    los items tengan exactamente el mismo ancho */}
-                <div className="grid grid-cols-5 gap-1">
-                  {ITEMS_SECUNDARIOS.map((item) => {
-                    const activo = estaActivo(item.ruta);
-                    return (
-                      <Link
+                <div className="pt-3 px-1.5 pb-0">
+                  {/* Misma grid de 5 columnas que la principal para alinear anchos */}
+                  <motion.div
+                    className="grid grid-cols-5 gap-1"
+                    initial="oculto"
+                    animate="visible"
+                    variants={{
+                      visible: {
+                        transition: { staggerChildren: 0.05, delayChildren: 0.05 },
+                      },
+                      oculto: {},
+                    }}
+                  >
+                    {ITEMS_SECUNDARIOS.map((item) => (
+                      <motion.div
                         key={item.id}
-                        href={item.ruta}
-                        aria-current={activo ? "page" : undefined}
+                        variants={{
+                          oculto: { opacity: 0, y: 8 },
+                          visible: { opacity: 1, y: 0 },
+                        }}
+                        transition={SPRING_SUAVE}
                         style={{ gridColumn: item.col }}
-                        className={cn(
-                          itemBaseClass,
-                          itemColorClass(activo),
-                          "transition-colors duration-200",
-                        )}
                       >
-                        {item.icono}
-                        <span className="text-[10px] font-medium leading-tight">
-                          {item.nombre}
-                        </span>
-                      </Link>
-                    );
-                  })}
+                        {renderItem(item, false)}
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                  {/* Separador tenue entre filas */}
+                  <div className="mx-3 mt-2 h-px bg-border/50" />
                 </div>
-                {/* Separador tenue entre ambas filas */}
-                <div className="mx-3 mt-2 h-px bg-border/50" />
-              </div>
-            </div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Barra principal - siempre visible */}
+          {/* Barra principal — siempre visible */}
           <div className="grid grid-cols-5 gap-1 p-1.5">
-            {ITEMS_PRINCIPALES.map((item) => {
-              const activo = estaActivo(item.ruta);
-              return (
-                <Link
-                  key={item.id}
-                  href={item.ruta}
-                  aria-current={activo ? "page" : undefined}
-                  className={cn(
-                    itemBaseClass,
-                    itemColorClass(activo),
-                    "transition-colors duration-200",
-                  )}
-                >
-                  {item.icono}
-                  <span className="text-[10px] font-medium leading-tight">
-                    {item.nombre}
-                  </span>
-                </Link>
-              );
-            })}
+            {ITEMS_PRINCIPALES.map((item) => renderItem(item))}
 
-            {/* Boton Mas / Menos - 5ta columna, mismo tamano */}
-            <button
+            {/* Boton Mas / Menos */}
+            <motion.button
               type="button"
               onClick={() => setExpandido((v) => !v)}
               aria-expanded={expandido}
               aria-label={expandido ? "Ocultar mas modulos" : "Ver mas modulos"}
+              whileTap={{ scale: 0.9 }}
+              transition={SPRING_SUAVE}
               className={cn(
                 itemBaseClass,
-                itemColorClass(expandido || algunSecundarioActivo),
-                "transition-colors duration-200",
+                expandido || algunSecundarioActivo
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <ChevronUp
-                className={cn("h-5 w-5")}
-                style={{
-                  transform: expandido ? "rotate(180deg)" : "rotate(0deg)",
-                  transitionProperty: "transform",
-                  transitionDuration: "350ms",
-                  transitionTimingFunction: EASE,
-                }}
-              />
-              <span className="text-[10px] font-medium leading-tight">
+              {(expandido || algunSecundarioActivo) && !expandido && (
+                <span className="absolute inset-0 -z-0 rounded-2xl bg-primary/15" />
+              )}
+              <motion.span
+                className="relative z-10"
+                animate={{ rotate: expandido ? 180 : 0 }}
+                transition={SPRING_SUAVE}
+              >
+                <ChevronUp className="h-5 w-5" />
+              </motion.span>
+              <span className="relative z-10 text-[10px] font-medium leading-tight">
                 {expandido ? "Menos" : "Mas"}
               </span>
-            </button>
+            </motion.button>
           </div>
-        </div>
+        </motion.div>
       </nav>
-    </>
+    </LayoutGroup>
   );
 }

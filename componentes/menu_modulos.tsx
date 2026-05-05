@@ -3,9 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   BarChart3,
-  UserPlus,
   ScanLine,
   Calculator,
   CloudCog,
@@ -39,7 +39,7 @@ const MODULOS: ModuloMenu[] = [
     id: "registro-visitantes",
     nombre: "Registro Visitantes",
     descripcion: "Registrar y emitir ticket",
-    icono: <UserPlus className="h-7 w-7" />,
+    icono: <ScanLine className="h-7 w-7" />,
     ruta: "/registro-visitantes",
   },
   // {
@@ -86,6 +86,11 @@ const MODULOS: ModuloMenu[] = [
   },
 ];
 
+const VARIANTES_ITEM = {
+  oculto: { opacity: 0, y: 12, scale: 0.96 },
+  visible: { opacity: 1, y: 0, scale: 1 },
+};
+
 function ModuloCard({
   modulo,
   esActivo,
@@ -96,33 +101,40 @@ function ModuloCard({
   onClick?: () => void;
 }) {
   return (
-    <Link
-      href={modulo.ruta}
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 transition-all duration-200",
-        "hover:border-primary hover:bg-primary/5 hover:scale-[1.02]",
-        "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background",
-        esActivo
-          ? "border-primary bg-primary/10 text-primary shadow-sm shadow-primary/20"
-          : "border-border/50 bg-card/50 text-muted-foreground hover:text-foreground",
-      )}
+    <motion.div
+      variants={VARIANTES_ITEM}
+      whileHover={{ y: -3, scale: 1.03 }}
+      whileTap={{ scale: 0.97 }}
+      transition={{ type: "spring", stiffness: 380, damping: 26 }}
     >
-      <div
+      <Link
+        href={modulo.ruta}
+        onClick={onClick}
         className={cn(
-          "transition-colors p-2 rounded-lg",
-          esActivo ? "text-primary bg-primary/10" : "text-muted-foreground",
+          "flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2",
+          "hover:border-primary hover:bg-primary/5",
+          "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background",
+          esActivo
+            ? "border-primary bg-primary/10 text-primary shadow-sm shadow-primary/20"
+            : "border-border/50 bg-card/50 text-muted-foreground hover:text-foreground",
         )}
       >
-        {modulo.icono}
-      </div>
-      <div className="text-center">
-        <span className="text-sm font-medium block">{modulo.nombre}</span>
-        <span className="text-xs text-muted-foreground hidden sm:block">
-          {modulo.descripcion}
-        </span>
-      </div>
-    </Link>
+        <div
+          className={cn(
+            "p-2 rounded-lg",
+            esActivo ? "text-primary bg-primary/10" : "text-muted-foreground",
+          )}
+        >
+          {modulo.icono}
+        </div>
+        <div className="text-center">
+          <span className="text-sm font-medium block">{modulo.nombre}</span>
+          <span className="text-xs text-muted-foreground hidden sm:block">
+            {modulo.descripcion}
+          </span>
+        </div>
+      </Link>
+    </motion.div>
   );
 }
 
@@ -131,7 +143,17 @@ export function MenuModulos() {
   const pathname = usePathname();
 
   const contenidoMenu = (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-2">
+    <motion.div
+      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 p-2"
+      initial="oculto"
+      animate="visible"
+      variants={{
+        visible: {
+          transition: { staggerChildren: 0.04, delayChildren: 0.05 },
+        },
+        oculto: {},
+      }}
+    >
       {MODULOS.map((modulo) => (
         <ModuloCard
           key={modulo.id}
@@ -140,7 +162,7 @@ export function MenuModulos() {
           onClick={() => setAbierto(false)}
         />
       ))}
-    </div>
+    </motion.div>
   );
 
   // Solo se muestra en desktop. En mobile se usa la BarraNavegacionInferior.
@@ -150,13 +172,33 @@ export function MenuModulos() {
         <Button
           variant="outline"
           size="icon"
-          className="hidden md:inline-flex border-primary/30 hover:bg-primary/10"
+          className="hidden md:inline-flex border-primary/30 hover:bg-primary/10 overflow-hidden"
         >
-          {abierto ? (
-            <X className="h-5 w-5" />
-          ) : (
-            <LayoutGrid className="h-5 w-5" />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            {abierto ? (
+              <motion.span
+                key="cerrar"
+                initial={{ rotate: -90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: 90, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="inline-flex"
+              >
+                <X className="h-5 w-5" />
+              </motion.span>
+            ) : (
+              <motion.span
+                key="abrir"
+                initial={{ rotate: 90, opacity: 0 }}
+                animate={{ rotate: 0, opacity: 1 }}
+                exit={{ rotate: -90, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="inline-flex"
+              >
+                <LayoutGrid className="h-5 w-5" />
+              </motion.span>
+            )}
+          </AnimatePresence>
           <span className="sr-only">Modulos del sistema</span>
         </Button>
       </DialogTrigger>

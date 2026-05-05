@@ -4,8 +4,8 @@
   "description": "Sistema de gestion de tickets y visitantes del Parque Nacional Actun Kan",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f1a14",
-  "theme_color": "#1b4332",
+  "background_color": "#f5f1e6",
+  "theme_color": "#5a8557",
   "orientation": "portrait-primary",
   "icons": [
     {

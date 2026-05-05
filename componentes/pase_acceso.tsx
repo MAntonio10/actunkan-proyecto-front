@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
-import { LogoActunKan } from './logo_actun_kan'
+import Image from 'next/image'
 import { type TipoAcceso } from '@/tipos'
 import { CodigoQR } from './codigo_qr'
 
@@ -41,7 +41,13 @@ export function PaseAcceso({
       <CardContent className="p-0">
         {/* Cabecera del pase */}
         <div className="flex flex-col items-center pt-6 pb-4 border-b border-dashed border-border/50">
-          <LogoActunKan className="h-12 w-12 text-primary mb-2" />
+          <Image
+            src="/actun.png"
+            alt="Actun Kan"
+            width={64}
+            height={64}
+            className="h-14 w-auto mb-2"
+          />
           <h2 className="text-xl font-bold tracking-tight">ACTUN KAN</h2>
           <span className="text-xs uppercase tracking-wider text-primary font-medium">
             Pase de Acceso
@@ -91,21 +97,24 @@ export function PaseAcceso({
             <div className="border-t border-dashed border-border/50" />
           </div>
 
-          {/* Total + QR Code */}
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                Total a Pagar
-              </span>
-              <p className="text-3xl font-bold mt-1">
-                ${montoTotal.toFixed(2)}
-              </p>
-            </div>
+          {/* Total */}
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              Total a Pagar
+            </span>
+            <p className="text-3xl font-bold">
+              Q{montoTotal.toFixed(2)}
+            </p>
+          </div>
 
-            {/* QR Code - componente puramente cliente para evitar hidratacion */}
-            <div className="bg-white p-2 rounded-lg w-[96px] h-[96px] flex items-center justify-center">
-              <CodigoQR valor={datosQR} size={80} />
+          {/* QR Code grande y centrado para escaneo desde el telefono */}
+          <div className="flex flex-col items-center pt-2">
+            <div className="bg-white p-3 rounded-lg shadow-sm">
+              <CodigoQR valor={datosQR} size={208} />
             </div>
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground mt-2">
+              Escanee para validar el ticket
+            </span>
           </div>
         </div>
       </CardContent>
