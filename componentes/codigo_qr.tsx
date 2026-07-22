@@ -21,7 +21,7 @@ export function CodigoQR({ valor, size = 80 }: CodigoQRProps) {
   useEffect(() => {
     // Importar dinamicamente solo en el cliente
     import('qrcode.react').then((mod) => {
-      setQRCodeSVG(() => mod.QRCodeSVG)
+      setQRCodeSVG(() => mod.QRCodeSVG as any)
     })
   }, [])
 

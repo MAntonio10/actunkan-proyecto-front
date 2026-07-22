@@ -12,6 +12,8 @@ import {
   Calculator,
   CloudCog,
   Users,
+  Heart,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,18 +57,32 @@ const ITEMS_PRINCIPALES: ItemNav[] = [
 // Secundarios: col indica en que columna (de 5) se ubican, centrados
 const ITEMS_SECUNDARIOS: ItemNav[] = [
   {
+    id: "donaciones",
+    nombre: "Donativos",
+    icono: <Heart className="h-5 w-5" />,
+    ruta: "/donaciones",
+    col: 1,
+  },
+  {
+    id: "auditoria",
+    nombre: "Auditoría",
+    icono: <History className="h-5 w-5" />,
+    ruta: "/auditoria",
+    col: 2,
+  },
+  {
     id: "sincronizacion",
     nombre: "Sync",
     icono: <CloudCog className="h-5 w-5" />,
     ruta: "/sincronizacion",
-    col: 2,
+    col: 4,
   },
   {
     id: "usuarios",
     nombre: "Usuarios",
     icono: <Users className="h-5 w-5" />,
     ruta: "/usuarios",
-    col: 4,
+    col: 5,
   },
 ];
 

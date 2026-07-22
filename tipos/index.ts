@@ -318,24 +318,98 @@ export const TIPOS_RECORRIDO: { valor: TipoRecorrido; etiqueta: string; descripc
 
 // Origen y categoria del visitante (definen el precio del ticket)
 export type OrigenVisitante = 'nacional' | 'extranjero'
-export type CategoriaVisitante = 'adulto' | 'nino' | 'centro_educativo'
+export type CategoriaVisitante = 'adulto' | 'nino' | 'nino_menor' | 'centro_educativo'
+export type AtraccionVisitante = 'cuevas' | 'mariposario'
 
 export const ORIGENES_VISITANTE: { valor: OrigenVisitante; etiqueta: string }[] = [
   { valor: 'nacional', etiqueta: 'Nacional' },
   { valor: 'extranjero', etiqueta: 'Extranjero' },
 ]
 
+export const ATRACCIONES_VISITANTE: { valor: AtraccionVisitante; etiqueta: string; descripcion: string }[] = [
+  { valor: 'cuevas', etiqueta: 'Cuevas Actun Kan', descripcion: 'Recorrido en cavernas naturales' },
+  { valor: 'mariposario', etiqueta: 'Mariposario', descripcion: 'Santuario de mariposas tropicales' },
+]
+
 export const CATEGORIAS_VISITANTE: { valor: CategoriaVisitante; etiqueta: string; descripcion: string }[] = [
   { valor: 'adulto', etiqueta: 'Adulto', descripcion: 'Mayor de edad' },
-  { valor: 'nino', etiqueta: 'Nino', descripcion: 'Menor de edad' },
+  { valor: 'nino', etiqueta: 'Niño (7 años o más)', descripcion: 'Tarifa infantil' },
+  { valor: 'nino_menor', etiqueta: 'Niño (Menor de 7 años)', descripcion: 'Entrada gratuita (Q0.00)' },
   { valor: 'centro_educativo', etiqueta: 'Centro Educativo', descripcion: 'Nivel primario' },
 ]
 
-// Precio en Quetzales por persona segun origen + categoria
+// Precio en Quetzales por persona segun atracción + origen + categoria
 export const PRECIOS_VISITANTE: Record<OrigenVisitante, Record<CategoriaVisitante, number>> = {
-  nacional: { adulto: 20, nino: 10, centro_educativo: 5 },
-  extranjero: { adulto: 25, nino: 25, centro_educativo: 5 },
+  nacional: { adulto: 20, nino: 10, nino_menor: 0, centro_educativo: 5 },
+  extranjero: { adulto: 25, nino: 25, nino_menor: 0, centro_educativo: 5 },
 }
+
+export const PRECIOS_MARIPOSARIO: Record<OrigenVisitante, Record<CategoriaVisitante, number>> = {
+  nacional: { adulto: 20, nino: 10, nino_menor: 0, centro_educativo: 5 },
+  extranjero: { adulto: 25, nino: 25, nino_menor: 0, centro_educativo: 5 },
+}
+
+export interface TicketEmitido {
+  id: string
+  numero_ticket: string
+  nombre_visitante: string
+  atraccion: AtraccionVisitante
+  origen: OrigenVisitante
+  tipo_recorrido: 'corto' | 'largo'
+  cantidad_personas: number
+  monto_total: number
+  metodo_pago: MetodoPago
+  nombre_guia?: string
+  tiene_carnet_guia?: boolean
+  monto_guia?: number
+  metodo_pago_guia?: MetodoPago
+  fecha: Date
+}
+
+export const TICKETS_EMITIDOS_DEMO: TicketEmitido[] = [
+  {
+    id: 't-101',
+    numero_ticket: 'TCK-2026-001',
+    nombre_visitante: 'Familia Morales',
+    atraccion: 'cuevas',
+    origen: 'nacional',
+    tipo_recorrido: 'largo',
+    cantidad_personas: 3,
+    monto_total: 50,
+    metodo_pago: 'efectivo',
+    nombre_guia: 'Juan Tecún',
+    tiene_carnet_guia: true,
+    fecha: new Date('2026-03-08T09:15:00'),
+  },
+  {
+    id: 't-102',
+    numero_ticket: 'TCK-2026-002',
+    nombre_visitante: 'John Smith & Group',
+    atraccion: 'mariposario',
+    origen: 'extranjero',
+    tipo_recorrido: 'corto',
+    cantidad_personas: 2,
+    monto_total: 50,
+    metodo_pago: 'tarjeta',
+    fecha: new Date('2026-03-08T10:45:00'),
+  },
+  {
+    id: 't-103',
+    numero_ticket: 'TCK-2026-003',
+    nombre_visitante: 'Delegación Escolar Petén',
+    atraccion: 'cuevas',
+    origen: 'nacional',
+    tipo_recorrido: 'corto',
+    cantidad_personas: 12,
+    monto_total: 60,
+    metodo_pago: 'efectivo',
+    nombre_guia: 'Pedro Ak\'abal',
+    tiene_carnet_guia: false,
+    monto_guia: 15,
+    metodo_pago_guia: 'efectivo',
+    fecha: new Date('2026-03-08T11:30:00'),
+  },
+]
 
 export const TIPOS_ACCESO: TipoAcceso[] = [
   { id: '1', nombre: 'Entrada General', precio: 15, precio_extranjero: 25, descripcion: 'Acceso general al parque', duracion_horas: 4 },
@@ -346,6 +420,39 @@ export const TIPOS_ACCESO: TipoAcceso[] = [
 ]
 
 export const PRECIO_APORTE_REFORESTACION = 2
+export const PRECIO_TICKET_GUIA_SIN_CARNET = 15
+
+export interface Guia {
+  id: string
+  nombre: string
+  numero_carnet?: string
+  tiene_carnet: boolean
+}
+
+export const GUIAS_DEMO: Guia[] = [
+  { id: 'g1', nombre: 'Juan Tecún', numero_carnet: 'GT-2024-001', tiene_carnet: true },
+  { id: 'g2', nombre: 'María Chajón', numero_carnet: 'GT-2023-045', tiene_carnet: true },
+  { id: 'g3', nombre: 'Pedro Ak\'abal', numero_carnet: '', tiene_carnet: false },
+]
+
+
+export type MetodoPago = 'efectivo' | 'tarjeta'
+
+export interface Donacion {
+  id: string
+  numero_recibo: string
+  nombre_donante: string
+  monto: number
+  metodo_pago: MetodoPago
+  fecha: Date
+  notas?: string
+}
+
+export const DONACIONES_DEMO: Donacion[] = [
+  { id: '1', numero_recibo: 'DON-2026-001', nombre_donante: 'Asociación Ecológica Petén', monto: 500, metodo_pago: 'efectivo', fecha: new Date('2026-03-05T10:30:00'), notas: 'Donativo para conservación de flora' },
+  { id: '2', numero_recibo: 'DON-2026-002', nombre_donante: 'Carlos Mendoza', monto: 200, metodo_pago: 'tarjeta', fecha: new Date('2026-03-07T14:15:00') },
+  { id: '3', numero_recibo: 'DON-2026-003', nombre_donante: 'Familia Ramírez', monto: 150, metodo_pago: 'efectivo', fecha: new Date('2026-03-08T09:00:00') },
+]
 
 export const MODULOS_SISTEMA: ModuloSistema[] = [
   {
@@ -362,6 +469,14 @@ export const MODULOS_SISTEMA: ModuloSistema[] = [
     descripcion: 'Registrar nuevos visitantes y grupos',
     icono: 'user-plus',
     ruta: '/registro-visitantes',
+    activo: true,
+  },
+  {
+    id: 'donaciones',
+    nombre: 'Módulo de Donaciones',
+    descripcion: 'Registro de donativos y emisión de recibos',
+    icono: 'heart',
+    ruta: '/donaciones',
     activo: true,
   },
   {

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Shield, Eye, EyeOff, LogIn, History } from "lucide-react";
+import { Shield, Eye, EyeOff, LogIn } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -17,30 +17,16 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import Image from "next/image";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { type RolUsuario } from "@/tipos";
-import Link from "next/link";
 
 const esquemaLogin = z.object({
   usuario: z.string().min(3, "Usuario requerido"),
-  contrasena: z.string().min(4, "Contrasena requerida"),
-  rol: z.enum([
-    "administrador",
-    "taquillero",
-    "supervisor",
-    "guardia",
-  ] as const),
+  contrasena: z.string().min(4, "Contraseña requerida"),
   recordarme: z.boolean().optional(),
 });
 
@@ -58,13 +44,13 @@ const USUARIOS_DEMO = [
     usuario: "admin",
     contrasena: "admin",
     rol: "administrador",
-    nombre: "Administrador",
+    nombre: "Administrador del Sistema",
   },
   {
     usuario: "supervisor",
     contrasena: "1234",
     rol: "supervisor",
-    nombre: "Maria Garcia",
+    nombre: "María García",
   },
 ];
 
@@ -84,7 +70,6 @@ export default function AutenticacionPage() {
     defaultValues: {
       usuario: "",
       contrasena: "",
-      rol: "taquillero",
       recordarme: false,
     },
   });
@@ -92,11 +77,11 @@ export default function AutenticacionPage() {
   const onSubmit = async (datos: FormularioLogin) => {
     setEnviando(true);
 
-    // Simular autenticacion
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Simular tiempo de respuesta de servidor
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     const usuarioEncontrado = USUARIOS_DEMO.find(
-      (u) => u.usuario === datos.usuario && u.contrasena === datos.contrasena,
+      (u) => u.usuario.toLowerCase() === datos.usuario.toLowerCase().trim() && u.contrasena === datos.contrasena,
     );
 
     if (usuarioEncontrado) {
@@ -108,14 +93,14 @@ export default function AutenticacionPage() {
         activo: true,
       });
 
-      toast.success("Bienvenido", {
-        description: `Sesion iniciada como ${usuarioEncontrado.nombre}`,
+      toast.success("¡Bienvenido al Sistema!", {
+        description: `Sesión iniciada como ${usuarioEncontrado.nombre}`,
       });
 
       router.push("/registro-visitantes");
     } else {
-      toast.error("Credenciales invalidas", {
-        description: "Usuario o contrasena incorrectos",
+      toast.error("Credenciales inválidas", {
+        description: "Usuario o contraseña incorrectos. Por favor intente nuevamente.",
       });
     }
 
@@ -124,7 +109,7 @@ export default function AutenticacionPage() {
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center p-4 overflow-hidden">
-      {/* Fondo decorativo: blobs organicos + viñeta calida */}
+      {/* Fondo decorativo */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -136,7 +121,7 @@ export default function AutenticacionPage() {
           `,
         }}
       />
-      {/* Curva decorativa inferior */}
+
       <svg
         aria-hidden
         className="pointer-events-none absolute -bottom-24 left-1/2 -z-10 h-[420px] w-[150%] -translate-x-1/2 opacity-40"
@@ -154,7 +139,7 @@ export default function AutenticacionPage() {
       </svg>
 
       <div className="relative z-10 w-full max-w-md space-y-6">
-        {/* Logo y titulo: medallon con anillo y resplandor */}
+        {/* Logo y Titular */}
         <div className="text-center space-y-3">
           <div className="relative mx-auto w-fit">
             <div
@@ -180,21 +165,21 @@ export default function AutenticacionPage() {
             <p className="text-xs font-medium uppercase tracking-[0.35em] text-muted-foreground">
               Parque Nacional
             </p>
-            <h1 className="text-xl font-medium uppercase tracking-[0.35em] text-muted-foreground">
+            <h1 className="text-xl font-bold uppercase tracking-[0.35em] text-foreground">
               ACTUN KAN
             </h1>
           </div>
         </div>
 
-        {/* Formulario de login */}
+        {/* Formulario de login limpio (sin seleccion de rol ni auditoria) */}
         <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
           <CardHeader className="text-center pb-2 pt-6">
             <CardTitle className="flex items-center justify-center gap-2 text-lg">
               <Shield className="h-5 w-5 text-primary" />
-              Iniciar Sesion
+              Iniciar Sesión
             </CardTitle>
             <CardDescription>
-              Ingrese sus credenciales para acceder al sistema
+              Ingrese sus credenciales de acceso al sistema
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -221,19 +206,19 @@ export default function AutenticacionPage() {
                 )}
               </div>
 
-              {/* Contrasena */}
+              {/* Contraseña */}
               <div className="space-y-2">
                 <Label
                   htmlFor="contrasena"
                   className="text-xs uppercase tracking-wider text-muted-foreground"
                 >
-                  Contrasena
+                  Contraseña
                 </Label>
                 <div className="relative">
                   <Input
                     id="contrasena"
                     type={mostrarContrasena ? "text" : "password"}
-                    placeholder="********"
+                    placeholder="••••••••"
                     className="bg-muted/50 border-border/50 h-11 pr-10"
                     autoComplete="current-password"
                     {...register("contrasena")}
@@ -241,7 +226,7 @@ export default function AutenticacionPage() {
                   <button
                     type="button"
                     onClick={() => setMostrarContrasena(!mostrarContrasena)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                   >
                     {mostrarContrasena ? (
                       <EyeOff className="h-4 w-4" />
@@ -257,31 +242,8 @@ export default function AutenticacionPage() {
                 )}
               </div>
 
-              {/* Rol */}
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Rol
-                </Label>
-                <Select
-                  defaultValue="taquillero"
-                  onValueChange={(valor) =>
-                    setValue("rol", valor as RolUsuario)
-                  }
-                >
-                  <SelectTrigger className="bg-muted/50 border-border/50 h-11">
-                    <SelectValue placeholder="Seleccionar rol" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="taquillero">Taquillero</SelectItem>
-                    <SelectItem value="supervisor">Supervisor</SelectItem>
-                    <SelectItem value="administrador">Administrador</SelectItem>
-                    <SelectItem value="guardia">Guardia</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
               {/* Recordarme */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 pt-1">
                 <Checkbox
                   id="recordarme"
                   onCheckedChange={(checked) =>
@@ -293,21 +255,21 @@ export default function AutenticacionPage() {
                 </Label>
               </div>
 
-              {/* Boton de envio */}
+              {/* Botón de envío */}
               <Button
                 type="submit"
-                className="w-full h-12 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary via-primary to-accent shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:brightness-105"
+                className="w-full h-12 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary via-primary to-accent shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:brightness-105 cursor-pointer"
                 disabled={enviando}
               >
                 {enviando ? (
                   <>
                     <Spinner className="mr-2 h-5 w-5" />
-                    Iniciando sesion...
+                    Iniciando sesión...
                   </>
                 ) : (
                   <>
                     <LogIn className="mr-2 h-5 w-5" />
-                    Iniciar Sesion
+                    Iniciar Sesión
                   </>
                 )}
               </Button>
@@ -315,22 +277,11 @@ export default function AutenticacionPage() {
           </CardContent>
         </Card>
 
-        {/* Enlace a auditoria */}
-        <div className="text-center">
-          <Link
-            href="/auditoria"
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
-          >
-            <History className="h-4 w-4" />
-            Ver registro de auditoria
-          </Link>
-        </div>
-
-        {/* Credenciales demo */}
+        {/* Credenciales demo para pruebas */}
         <Card className="border-dashed border-accent/40 bg-accent/10 backdrop-blur-sm">
           <CardContent className="pt-4">
             <p className="text-[11px] uppercase tracking-wider text-accent-foreground/80 text-center mb-2 font-semibold">
-              Credenciales de prueba
+              Credenciales de demostración
             </p>
             <div className="text-xs text-center space-y-1">
               <p>
@@ -338,16 +289,14 @@ export default function AutenticacionPage() {
                   luis.ramos
                 </span>{" "}
                 <span className="text-muted-foreground">/</span>{" "}
-                <span className="font-mono">1234</span>{" "}
-                <span className="text-muted-foreground">(Taquillero)</span>
+                <span className="font-mono">1234</span>
               </p>
               <p>
                 <span className="font-mono font-semibold text-foreground">
                   admin
                 </span>{" "}
                 <span className="text-muted-foreground">/</span>{" "}
-                <span className="font-mono">admin</span>{" "}
-                <span className="text-muted-foreground">(Administrador)</span>
+                <span className="font-mono">admin</span>
               </p>
             </div>
           </CardContent>
