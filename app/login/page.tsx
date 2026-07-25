@@ -1,11 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Shield, Eye, EyeOff, LogIn } from "lucide-react";
+import {
+  Shield,
+  Eye,
+  EyeOff,
+  LogIn,
+  KeyRound,
+  ArrowLeft,
+  Mail,
+  CheckCircle2,
+  RefreshCw,
+  Lock,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -22,89 +33,205 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import Image from "next/image";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
-import { type RolUsuario } from "@/tipos";
+import { api } from "@/lib/api";
 
 const esquemaLogin = z.object({
-  usuario: z.string().min(3, "Usuario requerido"),
-  contrasena: z.string().min(4, "Contraseña requerida"),
+  correo: z.string().min(1, "El correo es requerido").email("Ingrese un correo válido"),
+  contrasena: z.string().min(1, "La contraseña es requerida"),
   recordarme: z.boolean().optional(),
 });
 
-type FormularioLogin = z.infer<typeof esquemaLogin>;
+const esquemaSolicitarCodigo = z.object({
+  correo: z.string().min(1, "El correo es requerido").email("Ingrese un correo válido"),
+});
 
-// Usuarios demo para pruebas
-const USUARIOS_DEMO = [
-  {
-    usuario: "luis.ramos",
-    contrasena: "1234",
-    rol: "taquillero",
-    nombre: "Luis Ramos",
-  },
-  {
-    usuario: "admin",
-    contrasena: "admin",
-    rol: "administrador",
-    nombre: "Administrador del Sistema",
-  },
-  {
-    usuario: "supervisor",
-    contrasena: "1234",
-    rol: "supervisor",
-    nombre: "María García",
-  },
-];
+const esquemaRestablecerContrasena = z.object({
+  correo: z.string().min(1, "El correo es requerido").email("Ingrese un correo válido"),
+  codigo: z
+    .string()
+    .min(1, "El código es requerido")
+    .length(6, "El código debe tener exactamente 6 dígitos"),
+  nuevaContrasena: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+  confirmarContrasena: z.string().min(1, "Confirme la nueva contraseña"),
+}).refine((data) => data.nuevaContrasena === data.confirmarContrasena, {
+  message: "Las contraseñas no coinciden",
+  path: ["confirmarContrasena"],
+});
+
+type FormularioLogin = z.infer<typeof esquemaLogin>;
+type FormularioSolicitarCodigo = z.infer<typeof esquemaSolicitarCodigo>;
+type FormularioRestablecerContrasena = z.infer<typeof esquemaRestablecerContrasena>;
+
+type VistaAuth = "login" | "solicitar" | "restablecer";
 
 export default function AutenticacionPage() {
   const router = useRouter();
-  const { iniciarSesion } = useAutenticacion();
+  const { iniciarSesion, estaAutenticado, cargando } = useAutenticacion();
+  
+  const [vista, setVista] = useState<VistaAuth>("login");
   const [enviando, setEnviando] = useState(false);
   const [mostrarContrasena, setMostrarContrasena] = useState(false);
+  
+  const [mostrarNuevaContrasena, setMostrarNuevaContrasena] = useState(false);
+  const [mostrarConfirmarContrasena, setMostrarConfirmarContrasena] = useState(false);
+  
+  const [validandoCodigo, setValidandoCodigo] = useState(false);
+  const [codigoEsValido, setCodigoEsValido] = useState<boolean | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    setValue,
-    formState: { errors },
-  } = useForm<FormularioLogin>({
+  useEffect(() => {
+    if (!cargando && estaAutenticado) {
+      router.replace("/usuarios");
+    }
+  }, [cargando, estaAutenticado, router]);
+
+  // Formulario Iniciar Sesión
+  const formLogin = useForm<FormularioLogin>({
     resolver: zodResolver(esquemaLogin),
     defaultValues: {
-      usuario: "",
+      correo: "",
       contrasena: "",
       recordarme: false,
     },
   });
 
-  const onSubmit = async (datos: FormularioLogin) => {
+  // Formulario Solicitar Código
+  const formSolicitar = useForm<FormularioSolicitarCodigo>({
+    resolver: zodResolver(esquemaSolicitarCodigo),
+    defaultValues: {
+      correo: "",
+    },
+  });
+
+  // Formulario Restablecer Contraseña
+  const formRestablecer = useForm<FormularioRestablecerContrasena>({
+    resolver: zodResolver(esquemaRestablecerContrasena),
+    defaultValues: {
+      correo: "",
+      codigo: "",
+      nuevaContrasena: "",
+      confirmarContrasena: "",
+    },
+  });
+
+  // Submit Login
+  const onSubmitLogin = async (datos: FormularioLogin) => {
     setEnviando(true);
-
-    // Simular tiempo de respuesta de servidor
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const usuarioEncontrado = USUARIOS_DEMO.find(
-      (u) => u.usuario.toLowerCase() === datos.usuario.toLowerCase().trim() && u.contrasena === datos.contrasena,
-    );
-
-    if (usuarioEncontrado) {
-      iniciarSesion({
-        id: Math.random().toString(36).substr(2, 9),
-        nombre: usuarioEncontrado.nombre,
-        rol: usuarioEncontrado.rol as RolUsuario,
-        taquilla: usuarioEncontrado.rol === "taquillero" ? 1 : undefined,
-        activo: true,
-      });
-
+    try {
+      const usuarioLogueado = await iniciarSesion(datos.correo, datos.contrasena, datos.recordarme);
       toast.success("¡Bienvenido al Sistema!", {
-        description: `Sesión iniciada como ${usuarioEncontrado.nombre}`,
+        description: `Sesión iniciada como ${usuarioLogueado.nombre}`,
       });
-
-      router.push("/registro-visitantes");
-    } else {
+      router.push("/usuarios");
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "Error al iniciar sesión";
       toast.error("Credenciales inválidas", {
-        description: "Usuario o contraseña incorrectos. Por favor intente nuevamente.",
+        description: mensaje,
       });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  // Submit Solicitar Código
+  const onSubmitSolicitar = async (datos: FormularioSolicitarCodigo) => {
+    setEnviando(true);
+    try {
+      const res = await api.auth.solicitarCodigoRestablecimiento(datos.correo);
+      toast.success("Código enviado", {
+        description: res.mensaje || `Se ha enviado un código a ${datos.correo}`,
+      });
+      formRestablecer.setValue("correo", datos.correo);
+      setCodigoEsValido(null);
+      setVista("restablecer");
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "Error al enviar código";
+      toast.error("Error al enviar código", {
+        description: mensaje,
+      });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  // Validar código manualmente
+  const handleValidarCodigo = async () => {
+    const correo = formRestablecer.getValues("correo");
+    const codigo = formRestablecer.getValues("codigo");
+
+    if (!correo || !codigo || codigo.length !== 6) {
+      toast.error("Ingrese correo y un código válido de 6 dígitos");
+      return;
     }
 
-    setEnviando(false);
+    setValidandoCodigo(true);
+    try {
+      const res = await api.auth.validarCodigoRestablecimiento(correo, codigo);
+      if (res.valido) {
+        setCodigoEsValido(true);
+        toast.success("Código válido", {
+          description: res.mensaje || "El código ingresado es correcto.",
+        });
+      } else {
+        setCodigoEsValido(false);
+        toast.error("Código inválido", {
+          description: res.mensaje || "El código es incorrecto o ha expirado.",
+        });
+      }
+    } catch (err: unknown) {
+      setCodigoEsValido(false);
+      const mensaje = err instanceof Error ? err.message : "Error al validar el código";
+      toast.error("Código inválido o expirado", {
+        description: mensaje,
+      });
+    } finally {
+      setValidandoCodigo(false);
+    }
+  };
+
+  // Submit Restablecer Contraseña
+  const onSubmitRestablecer = async (datos: FormularioRestablecerContrasena) => {
+    setEnviando(true);
+    try {
+      const res = await api.auth.restablecerContrasena(
+        datos.correo,
+        datos.codigo,
+        datos.nuevaContrasena
+      );
+      toast.success("Contraseña restablecida", {
+        description: res.mensaje || "Ya puede iniciar sesión con su nueva contraseña.",
+      });
+      formLogin.setValue("correo", datos.correo);
+      setVista("login");
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "Error al restablecer la contraseña";
+      toast.error("No se pudo restablecer la contraseña", {
+        description: mensaje,
+      });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  // Reenviar código
+  const handleReenviarCodigo = async () => {
+    const correo = formRestablecer.getValues("correo");
+    if (!correo) return;
+
+    setEnviando(true);
+    try {
+      const res = await api.auth.solicitarCodigoRestablecimiento(correo);
+      toast.success("Código reenviado", {
+        description: res.mensaje || `Se ha enviado un nuevo código a ${correo}`,
+      });
+      setCodigoEsValido(null);
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "Error al reenviar código";
+      toast.error("Error al reenviar código", {
+        description: mensaje,
+      });
+    } finally {
+      setEnviando(false);
+    }
   };
 
   return (
@@ -171,136 +298,397 @@ export default function AutenticacionPage() {
           </div>
         </div>
 
-        {/* Formulario de login limpio (sin seleccion de rol ni auditoria) */}
-        <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
-          <CardHeader className="text-center pb-2 pt-6">
-            <CardTitle className="flex items-center justify-center gap-2 text-lg">
-              <Shield className="h-5 w-5 text-primary" />
-              Iniciar Sesión
-            </CardTitle>
-            <CardDescription>
-              Ingrese sus credenciales de acceso al sistema
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              {/* Usuario */}
-              <div className="space-y-2">
-                <Label
-                  htmlFor="usuario"
-                  className="text-xs uppercase tracking-wider text-muted-foreground"
-                >
-                  Usuario
-                </Label>
-                <Input
-                  id="usuario"
-                  placeholder="nombre.usuario"
-                  className="bg-muted/50 border-border/50 h-11"
-                  autoComplete="username"
-                  {...register("usuario")}
-                />
-                {errors.usuario && (
-                  <p className="text-sm text-destructive">
-                    {errors.usuario.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Contraseña */}
-              <div className="space-y-2">
-                <Label
-                  htmlFor="contrasena"
-                  className="text-xs uppercase tracking-wider text-muted-foreground"
-                >
-                  Contraseña
-                </Label>
-                <div className="relative">
+        {/* VISTA 1: FORMULARIO DE LOGIN */}
+        {vista === "login" && (
+          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+            <CardHeader className="text-center pb-2 pt-6">
+              <CardTitle className="flex items-center justify-center gap-2 text-lg">
+                <Shield className="h-5 w-5 text-primary" />
+                Iniciar Sesión
+              </CardTitle>
+              <CardDescription>
+                Ingrese sus credenciales de acceso al sistema
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={formLogin.handleSubmit(onSubmitLogin)} className="space-y-4">
+                {/* Correo Electrónico */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="correo"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Correo Electrónico
+                  </Label>
                   <Input
-                    id="contrasena"
-                    type={mostrarContrasena ? "text" : "password"}
-                    placeholder="••••••••"
-                    className="bg-muted/50 border-border/50 h-11 pr-10"
-                    autoComplete="current-password"
-                    {...register("contrasena")}
+                    id="correo"
+                    type="email"
+                    placeholder="usuario@aktunkan.com"
+                    className="bg-muted/50 border-border/50 h-11"
+                    autoComplete="email"
+                    {...formLogin.register("correo")}
                   />
+                  {formLogin.formState.errors.correo && (
+                    <p className="text-sm text-destructive">
+                      {formLogin.formState.errors.correo.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Contraseña */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="contrasena"
+                      className="text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Contraseña
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const correoActual = formLogin.getValues("correo");
+                        if (correoActual) {
+                          formSolicitar.setValue("correo", correoActual);
+                        }
+                        setVista("solicitar");
+                      }}
+                      className="text-xs text-primary hover:underline font-medium cursor-pointer"
+                    >
+                      ¿Olvidó su contraseña?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="contrasena"
+                      type={mostrarContrasena ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="bg-muted/50 border-border/50 h-11 pr-10"
+                      autoComplete="current-password"
+                      {...formLogin.register("contrasena")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMostrarContrasena(!mostrarContrasena)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {mostrarContrasena ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {formLogin.formState.errors.contrasena && (
+                    <p className="text-sm text-destructive">
+                      {formLogin.formState.errors.contrasena.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Recordarme */}
+                <div className="flex items-center space-x-2 pt-1">
+                  <Checkbox
+                    id="recordarme"
+                    onCheckedChange={(checked) =>
+                      formLogin.setValue("recordarme", !!checked)
+                    }
+                  />
+                  <Label htmlFor="recordarme" className="text-sm cursor-pointer">
+                    Recordarme en este dispositivo
+                  </Label>
+                </div>
+
+                {/* Botón de envío */}
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 cursor-pointer"
+                  disabled={enviando}
+                >
+                  {enviando ? (
+                    <>
+                      <Spinner className="mr-2 h-5 w-5" />
+                      Iniciando sesión...
+                    </>
+                  ) : (
+                    <>
+                      <LogIn className="mr-2 h-5 w-5" />
+                      Iniciar Sesión
+                    </>
+                  )}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* VISTA 2: SOLICITAR CÓDIGO DE RESTABLECIMIENTO */}
+        {vista === "solicitar" && (
+          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+            <CardHeader className="text-center pb-2 pt-6">
+              <CardTitle className="flex items-center justify-center gap-2 text-lg">
+                <KeyRound className="h-5 w-5 text-primary" />
+                ¿Olvidó su contraseña?
+              </CardTitle>
+              <CardDescription>
+                Ingrese su correo electrónico para recibir un código de verificación de 6 dígitos
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={formSolicitar.handleSubmit(onSubmitSolicitar)} className="space-y-4">
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="solicitar-correo"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Correo Electrónico Registrado
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="solicitar-correo"
+                      type="email"
+                      placeholder="usuario@aktunkan.com"
+                      className="bg-muted/50 border-border/50 h-11 pl-10"
+                      autoComplete="email"
+                      {...formSolicitar.register("correo")}
+                    />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  </div>
+                  {formSolicitar.formState.errors.correo && (
+                    <p className="text-sm text-destructive">
+                      {formSolicitar.formState.errors.correo.message}
+                    </p>
+                  )}
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 cursor-pointer"
+                  disabled={enviando}
+                >
+                  {enviando ? (
+                    <>
+                      <Spinner className="mr-2 h-5 w-5" />
+                      Enviando código...
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="mr-2 h-5 w-5" />
+                      Enviar Código de Verificación
+                    </>
+                  )}
+                </Button>
+
+                <div className="pt-2 text-center">
                   <button
                     type="button"
-                    onClick={() => setMostrarContrasena(!mostrarContrasena)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    onClick={() => setVista("login")}
+                    className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground font-medium transition-colors cursor-pointer"
                   >
-                    {mostrarContrasena ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
+                    <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+                    Volver a Iniciar Sesión
                   </button>
                 </div>
-                {errors.contrasena && (
-                  <p className="text-sm text-destructive">
-                    {errors.contrasena.message}
-                  </p>
-                )}
-              </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
 
-              {/* Recordarme */}
-              <div className="flex items-center space-x-2 pt-1">
-                <Checkbox
-                  id="recordarme"
-                  onCheckedChange={(checked) =>
-                    setValue("recordarme", !!checked)
-                  }
-                />
-                <Label htmlFor="recordarme" className="text-sm cursor-pointer">
-                  Recordarme en este dispositivo
-                </Label>
-              </div>
+        {/* VISTA 3: VALIDAR CÓDIGO Y RESTABLECER CONTRASEÑA */}
+        {vista === "restablecer" && (
+          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+            <CardHeader className="text-center pb-2 pt-6">
+              <CardTitle className="flex items-center justify-center gap-2 text-lg">
+                <Lock className="h-5 w-5 text-primary" />
+                Restablecer Contraseña
+              </CardTitle>
+              <CardDescription>
+                Ingrese el código de 6 dígitos enviado a su correo y establezca su nueva contraseña
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={formRestablecer.handleSubmit(onSubmitRestablecer)} className="space-y-4">
+                {/* Correo Electrónico */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="restablecer-correo"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Correo Electrónico
+                  </Label>
+                  <Input
+                    id="restablecer-correo"
+                    type="email"
+                    className="bg-muted/50 border-border/50 h-10 text-sm"
+                    {...formRestablecer.register("correo")}
+                  />
+                  {formRestablecer.formState.errors.correo && (
+                    <p className="text-xs text-destructive">
+                      {formRestablecer.formState.errors.correo.message}
+                    </p>
+                  )}
+                </div>
 
-              {/* Botón de envío */}
-              <Button
-                type="submit"
-                className="w-full h-12 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary via-primary to-accent shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 hover:brightness-105 cursor-pointer"
-                disabled={enviando}
-              >
-                {enviando ? (
-                  <>
-                    <Spinner className="mr-2 h-5 w-5" />
-                    Iniciando sesión...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="mr-2 h-5 w-5" />
+                {/* Código de Verificación */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="codigo"
+                      className="text-xs uppercase tracking-wider text-muted-foreground"
+                    >
+                      Código de 6 dígitos
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={handleValidarCodigo}
+                      disabled={validandoCodigo}
+                      className="text-xs text-primary hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                    >
+                      {validandoCodigo ? (
+                        <Spinner className="h-3 w-3" />
+                      ) : (
+                        <CheckCircle2 className="h-3 w-3" />
+                      )}
+                      Verificar código
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="codigo"
+                      type="text"
+                      maxLength={6}
+                      placeholder="123456"
+                      className="bg-muted/50 border-border/50 h-11 text-center text-lg tracking-[0.3em] font-mono"
+                      {...formRestablecer.register("codigo")}
+                      onChange={(e) => {
+                        formRestablecer.setValue("codigo", e.target.value);
+                        setCodigoEsValido(null);
+                      }}
+                    />
+                    {codigoEsValido === true && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-500" />
+                    )}
+                  </div>
+                  {formRestablecer.formState.errors.codigo && (
+                    <p className="text-xs text-destructive">
+                      {formRestablecer.formState.errors.codigo.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Nueva Contraseña */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="nuevaContrasena"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Nueva Contraseña
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="nuevaContrasena"
+                      type={mostrarNuevaContrasena ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="bg-muted/50 border-border/50 h-11 pr-10"
+                      {...formRestablecer.register("nuevaContrasena")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMostrarNuevaContrasena(!mostrarNuevaContrasena)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {mostrarNuevaContrasena ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {formRestablecer.formState.errors.nuevaContrasena && (
+                    <p className="text-xs text-destructive">
+                      {formRestablecer.formState.errors.nuevaContrasena.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Confirmar Nueva Contraseña */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="confirmarContrasena"
+                    className="text-xs uppercase tracking-wider text-muted-foreground"
+                  >
+                    Confirmar Nueva Contraseña
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="confirmarContrasena"
+                      type={mostrarConfirmarContrasena ? "text" : "password"}
+                      placeholder="••••••••"
+                      className="bg-muted/50 border-border/50 h-11 pr-10"
+                      {...formRestablecer.register("confirmarContrasena")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMostrarConfirmarContrasena(!mostrarConfirmarContrasena)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {mostrarConfirmarContrasena ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {formRestablecer.formState.errors.confirmarContrasena && (
+                    <p className="text-xs text-destructive">
+                      {formRestablecer.formState.errors.confirmarContrasena.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Botón Guardar Nueva Contraseña */}
+                <Button
+                  type="submit"
+                  className="w-full h-12 text-base font-semibold text-primary-foreground bg-primary hover:bg-primary/90 shadow-md shadow-primary/25 transition-all hover:shadow-lg hover:shadow-primary/30 cursor-pointer"
+                  disabled={enviando}
+                >
+                  {enviando ? (
+                    <>
+                      <Spinner className="mr-2 h-5 w-5" />
+                      Restableciendo contraseña...
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="mr-2 h-5 w-5" />
+                      Restablecer Contraseña
+                    </>
+                  )}
+                </Button>
+
+                <div className="flex items-center justify-between pt-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={handleReenviarCodigo}
+                    disabled={enviando}
+                    className="text-muted-foreground hover:text-foreground font-medium flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Reenviar código
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setVista("login")}
+                    className="text-muted-foreground hover:text-foreground font-medium flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowLeft className="h-3 w-3" />
                     Iniciar Sesión
-                  </>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Credenciales demo para pruebas */}
-        <Card className="border-dashed border-accent/40 bg-accent/10 backdrop-blur-sm">
-          <CardContent className="pt-4">
-            <p className="text-[11px] uppercase tracking-wider text-accent-foreground/80 text-center mb-2 font-semibold">
-              Credenciales de demostración
-            </p>
-            <div className="text-xs text-center space-y-1">
-              <p>
-                <span className="font-mono font-semibold text-foreground">
-                  luis.ramos
-                </span>{" "}
-                <span className="text-muted-foreground">/</span>{" "}
-                <span className="font-mono">1234</span>
-              </p>
-              <p>
-                <span className="font-mono font-semibold text-foreground">
-                  admin
-                </span>{" "}
-                <span className="text-muted-foreground">/</span>{" "}
-                <span className="font-mono">admin</span>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+                  </button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

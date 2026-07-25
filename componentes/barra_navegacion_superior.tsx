@@ -3,15 +3,7 @@
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { MenuModulos } from "./menu_modulos";
 import { IndicadorConectividad } from "./indicador_conectividad";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
@@ -114,45 +106,20 @@ export function BarraNavegacionSuperior() {
         >
           <IndicadorConectividad />
 
-          {/* Menu de usuario */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="flex items-center gap-2 px-2">
-                <div className="hidden sm:flex flex-col items-end">
-                  <span className="text-sm font-medium">{usuario?.nombre}</span>
-                  <span className="text-xs text-primary">
-                    Taquilla {usuario?.taquilla}
-                  </span>
-                </div>
-                <Avatar className="h-9 w-9 border-2 border-primary/30">
-                  <AvatarImage src={usuario?.avatar} alt={usuario?.nombre} />
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                    {iniciales}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span>{usuario?.nombre}</span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {usuario?.rol === "taquillero"
-                      ? "Taquillero"
-                      : usuario?.rol}
-                  </span>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleCerrarSesion}
-                className="text-destructive focus:text-destructive"
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                Cerrar sesion
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Info del usuario */}
+          <div className="flex items-center gap-2 px-2">
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-sm font-medium">{usuario?.nombre || 'Usuario'}</span>
+              <span className="text-xs text-primary font-medium">
+                {usuario?.puesto?.nombre || 'Personal'}
+              </span>
+            </div>
+            <Avatar className="h-9 w-9 border-2 border-primary/30">
+              <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                {iniciales}
+              </AvatarFallback>
+            </Avatar>
+          </div>
 
           {/* Boton de salir rapido */}
           <Button

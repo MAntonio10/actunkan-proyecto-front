@@ -107,6 +107,34 @@ export interface RegistroAuditoria {
   datos_adicionales?: Record<string, unknown>
 }
 
+export interface BitacoraBackend {
+  id: number
+  idUsuario: number
+  usuarioNombre: string
+  accion: string
+  modulo: string
+  descripcion: string
+  fecha: string
+  usuario?: {
+    id: number
+    nombre: string
+    correo: string
+    puesto?: {
+      id: number
+      nombre: string
+    }
+  }
+}
+
+export interface FiltrosBitacora {
+  idUsuario?: number
+  modulo?: string
+  accion?: string
+  fechaInicio?: string
+  fechaFin?: string
+  limite?: number
+}
+
 export interface CierreDiario {
   id: string
   fecha: Date
@@ -601,3 +629,68 @@ export const ESTADISTICAS_SEMANA: EstadisticasDiarias[] = [
   { fecha: new Date('2026-03-06'), visitantes: 356, ingresos: 5340, tickets_emitidos: 128 },
   { fecha: new Date('2026-03-07'), visitantes: 312, ingresos: 4680, tickets_emitidos: 112 },
 ]
+
+// ==========================================
+// Interfaces Backend para API REST Aktun Kan
+// ==========================================
+
+export interface PuestoBackend {
+  id: number
+  nombre: string
+  descripcion: string
+  anulado: boolean
+  fechaCreacion: string
+  fechaActualizacion: string
+  _count?: {
+    usuarios: number
+  }
+}
+
+export interface AccionBackend {
+  id: number
+  nombre: string
+}
+
+export interface ModuloBackend {
+  id: number
+  nombre: string
+  anulado: boolean
+  fechaCreacion: string
+  fechaActualizacion: string
+  moduloAcciones?: ModuloAccionBackend[]
+}
+
+export interface ModuloAccionBackend {
+  id: number
+  idModulo: number
+  idAccion: number
+  modulo?: ModuloBackend
+  accion?: AccionBackend
+}
+
+export interface PermisoBackend {
+  id: number
+  idUsuario: number
+  idModuloAccion: number
+  moduloAccion?: ModuloAccionBackend
+}
+
+export interface UsuarioBackend {
+  id: number
+  idPuesto: number
+  nombre: string
+  correo: string
+  telefono: string
+  fechaCreacion: string
+  fechaActualizacion: string
+  anulado: boolean
+  puesto?: PuestoBackend
+  permiso?: PermisoBackend[]
+}
+
+export interface RespuestaLogin {
+  access_token: string
+  token_type: string
+  usuario: UsuarioBackend
+}
+

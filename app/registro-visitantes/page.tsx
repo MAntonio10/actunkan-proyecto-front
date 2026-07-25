@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import {
   FormularioVisitanteCompleto,
   type DatosTicketPreview,
@@ -35,7 +36,8 @@ export default function RegistroVisitantesPage() {
   }, [])
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <RutaProtegida>
+      <div className="min-h-screen flex flex-col">
       <BarraNavegacionSuperior />
 
       <main className="flex-1 container mx-auto px-4 py-6 md:py-8">
@@ -100,5 +102,6 @@ export default function RegistroVisitantesPage() {
         )}
       </main>
     </div>
+    </RutaProtegida>
   )
 }

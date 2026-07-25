@@ -37,6 +37,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Spinner } from '@/components/ui/spinner'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { TIPOS_ACCESO } from '@/tipos'
 
 // Datos de ejemplo para el cierre del dia
@@ -99,8 +100,9 @@ export default function CierreDiarioPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <BarraNavegacionSuperior />
+    <RutaProtegida moduloRequerido="Cierre Diario">
+      <div className="min-h-screen bg-background">
+        <BarraNavegacionSuperior />
       
       <main className="container mx-auto px-4 py-6">
         {/* Encabezado */}
@@ -315,6 +317,7 @@ export default function CierreDiarioPage() {
           </div>
         </div>
       </main>
-    </div>
+      </div>
+    </RutaProtegida>
   )
 }

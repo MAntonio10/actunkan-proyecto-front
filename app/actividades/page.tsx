@@ -20,6 +20,7 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -422,8 +423,9 @@ export default function ActividadesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <BarraNavegacionSuperior />
+    <RutaProtegida moduloRequerido="Actividades">
+      <div className="min-h-screen bg-background flex flex-col">
+        <BarraNavegacionSuperior />
 
       <main className="flex-1 container mx-auto px-4 py-6 max-w-5xl">
         {/* Encabezado */}
@@ -503,6 +505,7 @@ export default function ActividadesPage() {
         onCerrar={() => setFormularioAbierto(false)}
         onGuardar={handleGuardar}
       />
-    </div>
+      </div>
+    </RutaProtegida>
   )
 }

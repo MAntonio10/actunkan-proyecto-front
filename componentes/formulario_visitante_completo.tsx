@@ -705,7 +705,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
               <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <span>Visitantes por Categoría ({atraccion === "cuevas" ? "Cuevas" : "Mariposario"} · {origen === "nacional" ? "Nacionales" : "Extranjeros"})</span>
                 {modoEdicionPrecios && (
-                  <span className="text-[10px] bg-emerald-500/15 text-emerald-500 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  <span className="hidden sm:inline-block text-[10px] bg-emerald-500/15 text-emerald-500 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
                     Modo Edición Habilitado
                   </span>
                 )}
@@ -897,7 +897,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -907,7 +907,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                   setNombreGuiaInput("");
                   setNumeroCarnetGuiaInput("");
                 }}
-                className={`text-xs h-9 border-2 cursor-pointer transition-colors ${
+                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
                   modoGuia === "sin_guia"
                     ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
                     : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
@@ -925,7 +925,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                     handleSeleccionarGuiaExistente(guiasDisponibles[0].id);
                   }
                 }}
-                className={`text-xs h-9 border-2 cursor-pointer transition-colors ${
+                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
                   modoGuia === "existente"
                     ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
                     : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
@@ -944,7 +944,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                   setNumeroCarnetGuiaInput("");
                   setTieneCarnetGuia(true);
                 }}
-                className={`text-xs h-9 border-2 cursor-pointer transition-colors ${
+                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
                   modoGuia === "nuevo"
                     ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
                     : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"

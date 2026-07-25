@@ -25,6 +25,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { ENTRADAS_SALIDAS_DEMO, type EntradaSalida } from '@/tipos'
 
 export default function ControlAccesoPage() {
@@ -90,8 +91,9 @@ export default function ControlAccesoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <BarraNavegacionSuperior />
+    <RutaProtegida moduloRequerido="Registro Visitantes">
+      <div className="min-h-screen bg-background">
+        <BarraNavegacionSuperior />
       
       <main className="container mx-auto px-4 py-6">
         {/* Encabezado */}
@@ -263,6 +265,7 @@ export default function ControlAccesoPage() {
           </CardContent>
         </Card>
       </main>
-    </div>
+      </div>
+    </RutaProtegida>
   )
 }

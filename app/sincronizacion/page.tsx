@@ -29,6 +29,7 @@ import {
   Calculator,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { Spinner } from '@/components/ui/spinner'
 import { type OperacionPendiente } from '@/tipos'
 
@@ -168,8 +169,9 @@ export default function SincronizacionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <BarraNavegacionSuperior />
+    <RutaProtegida moduloRequerido="Sincronizacion">
+      <div className="min-h-screen bg-background">
+        <BarraNavegacionSuperior />
       
       <main className="container mx-auto px-4 py-6">
         {/* Encabezado */}
@@ -290,78 +292,159 @@ export default function SincronizacionPage() {
                 <p className="text-muted-foreground">No hay operaciones pendientes</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border/50">
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Detalles</TableHead>
-                    <TableHead>Creado</TableHead>
-                    <TableHead>Intentos</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              <>
+                {/* Vista Escritorio (Tabla) */}
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border/50">
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Detalles</TableHead>
+                        <TableHead>Creado</TableHead>
+                        <TableHead>Intentos</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {operaciones.map((op) => (
+                        <TableRow key={op.id} className="border-border/30">
+                          <TableCell>
+                            <Badge variant="outline" className="gap-1">
+                              {ICONOS_OPERACION[op.tipo]}
+                              {ETIQUETAS_OPERACION[op.tipo]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {JSON.stringify(op.datos)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatearTiempo(op.fecha_creacion)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={op.intentos > 1 ? 'destructive' : 'secondary'}>
+                              {op.intentos}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {op.error ? (
+                              <div className="flex items-center gap-1 text-red-500">
+                                <AlertCircle className="h-4 w-4" />
+                                <span className="text-sm">{op.error}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1 text-amber-500">
+                                <Clock className="h-4 w-4" />
+                                <span className="text-sm">Pendiente</span>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => reintentarOperacion(op.id)}
+                                disabled={!estaConectado}
+                              >
+                                <Play className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => eliminarOperacion(op.id)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Vista Móvil (Tarjetas) */}
+                <div className="grid grid-cols-1 gap-3 p-4 md:hidden">
                   {operaciones.map((op) => (
-                    <TableRow key={op.id} className="border-border/30">
-                      <TableCell>
-                        <Badge variant="outline" className="gap-1">
+                    <div
+                      key={op.id}
+                      className="p-4 rounded-xl border border-border/60 bg-card/60 space-y-3 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-2">
+                        <Badge variant="outline" className="gap-1 font-semibold text-xs">
                           {ICONOS_OPERACION[op.tipo]}
                           {ETIQUETAS_OPERACION[op.tipo]}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {JSON.stringify(op.datos)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatearTiempo(op.fecha_creacion)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={op.intentos > 1 ? 'destructive' : 'secondary'}>
-                          {op.intentos}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
                         {op.error ? (
-                          <div className="flex items-center gap-1 text-red-500">
-                            <AlertCircle className="h-4 w-4" />
-                            <span className="text-sm">{op.error}</span>
-                          </div>
+                          <Badge variant="destructive" className="gap-1 text-[11px]">
+                            <AlertCircle className="h-3 w-3" />
+                            Error
+                          </Badge>
                         ) : (
-                          <div className="flex items-center gap-1 text-amber-500">
-                            <Clock className="h-4 w-4" />
-                            <span className="text-sm">Pendiente</span>
+                          <Badge variant="secondary" className="gap-1 text-[11px] text-amber-500 border-amber-500/30 bg-amber-500/10">
+                            <Clock className="h-3 w-3" />
+                            Pendiente
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between text-muted-foreground gap-2">
+                          <span>Detalles:</span>
+                          <span className="font-mono text-foreground font-medium truncate max-w-[200px]">
+                            {JSON.stringify(op.datos)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span>Creado:</span>
+                          <span>{formatearTiempo(op.fecha_creacion)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-muted-foreground">
+                          <span>Intentos:</span>
+                          <Badge variant={op.intentos > 1 ? 'destructive' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                            {op.intentos}
+                          </Badge>
+                        </div>
+                        {op.error && (
+                          <div className="mt-2 p-2 rounded bg-red-500/10 border border-red-500/20 text-red-500 text-xs flex items-center gap-1.5">
+                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span>{op.error}</span>
                           </div>
                         )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => reintentarOperacion(op.id)}
-                            disabled={!estaConectado}
-                          >
-                            <Play className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => eliminarOperacion(op.id)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => reintentarOperacion(op.id)}
+                          disabled={!estaConectado}
+                          className="h-8 gap-1 text-xs"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          Reintentar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => eliminarOperacion(op.id)}
+                          className="h-8 gap-1 text-xs text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
       </main>
-    </div>
+      </div>
+    </RutaProtegida>
   )
 }

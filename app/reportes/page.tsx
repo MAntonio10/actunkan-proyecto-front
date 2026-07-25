@@ -34,6 +34,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
+import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { ESTADISTICAS_SEMANA } from '@/tipos'
 
 // Datos para graficos
@@ -71,8 +72,9 @@ export default function ReportesPage() {
   const promedioVisitantesDia = Math.round(totalVisitantes / ESTADISTICAS_SEMANA.length)
 
   return (
-    <div className="min-h-screen bg-background">
-      <BarraNavegacionSuperior />
+    <RutaProtegida moduloRequerido="Reportes">
+      <div className="min-h-screen bg-background">
+        <BarraNavegacionSuperior />
       
       <main className="container mx-auto px-4 py-6">
         {/* Encabezado */}
@@ -324,6 +326,7 @@ export default function ReportesPage() {
           </Card>
         </div>
       </main>
-    </div>
+      </div>
+    </RutaProtegida>
   )
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { api } from "@/lib/api";
 import {
   BarChart3,
   ScanLine,
@@ -17,6 +18,7 @@ import {
   History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,11 +54,11 @@ const MODULOS: ModuloMenu[] = [
     ruta: "/donaciones",
   },
   {
-    id: "auditoria",
-    nombre: "Auditoría",
-    descripcion: "Bitácora y registro de eventos",
+    id: "bitacora",
+    nombre: "Bitácora",
+    descripcion: "Bitácora y registro de actividades",
     icono: <History className="h-7 w-7" />,
-    ruta: "/auditoria",
+    ruta: "/bitacora",
   },
   // {
   //   id: 'control-acceso',
@@ -159,7 +161,92 @@ function ModuloCard({
 
 export function MenuModulos() {
   const [abierto, setAbierto] = useState(false);
+  const [modulosAnulados, setModulosAnulados] = useState<string[]>([]);
   const pathname = usePathname();
+  const { tieneAccesoModulo, tienePermiso } = useAutenticacion();
+
+  useEffect(() => {
+    if (abierto) {
+      api.modulos
+        .getModulos(true)
+        .then((res) => {
+          if (Array.isArray(res)) {
+            const anulados = res.filter((m) => m.anulado).map((m) => m.nombre.toLowerCase().trim());
+            setModulosAnulados(anulados);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [abierto]);
+
+  const esModuloAnuladoBD = (nombres: string[]) => {
+    return nombres.some((n) => modulosAnulados.includes(n.toLowerCase().trim()));
+  };
+
+  const modulosPermitidos = MODULOS.filter((modulo) => {
+    if (modulo.id === "usuarios") {
+      if (esModuloAnuladoBD(["Usuarios"])) return false;
+      return (
+        tieneAccesoModulo("Usuarios") ||
+        tienePermiso("Usuarios", "Ver") ||
+        tieneAccesoModulo("Puestos") ||
+        tieneAccesoModulo("Modulos")
+      );
+    }
+    if (modulo.id === "registro-visitantes") {
+      if (esModuloAnuladoBD(["Registro Visitantes", "Visitantes", "RegistroVisitantes", "Taquilla"])) return false;
+      return (
+        tieneAccesoModulo("Registro Visitantes") ||
+        tieneAccesoModulo("Visitantes") ||
+        tieneAccesoModulo("RegistroVisitantes") ||
+        tieneAccesoModulo("Taquilla") ||
+        tienePermiso("Registro Visitantes", "Ver") ||
+        tienePermiso("Visitantes", "Ver")
+      );
+    }
+    if (modulo.id === "donaciones") {
+      if (esModuloAnuladoBD(["Donaciones"])) return false;
+      return tieneAccesoModulo("Donaciones") || tienePermiso("Donaciones", "Ver");
+    }
+    if (modulo.id === "bitacora" || modulo.id === "auditoria") {
+      if (esModuloAnuladoBD(["Auditoria", "Auditoría", "Bitacora", "Bitácora"])) return false;
+      return (
+        tieneAccesoModulo("Auditoria") ||
+        tieneAccesoModulo("Auditoría") ||
+        tieneAccesoModulo("Bitacora") ||
+        tieneAccesoModulo("Bitácora") ||
+        tienePermiso("Auditoria", "Ver") ||
+        tienePermiso("Bitacora", "Ver")
+      );
+    }
+    if (modulo.id === "cierre-diario") {
+      if (esModuloAnuladoBD(["Cierre Diario", "CierreDiario"])) return false;
+      return (
+        tieneAccesoModulo("Cierre Diario") ||
+        tieneAccesoModulo("CierreDiario") ||
+        tienePermiso("Cierre Diario", "Ver")
+      );
+    }
+    if (modulo.id === "reportes") {
+      if (esModuloAnuladoBD(["Reportes"])) return false;
+      return tieneAccesoModulo("Reportes") || tienePermiso("Reportes", "Ver");
+    }
+    if (modulo.id === "sincronizacion") {
+      if (esModuloAnuladoBD(["Sincronizacion", "Sincronización"])) return false;
+      return (
+        tieneAccesoModulo("Sincronizacion") ||
+        tieneAccesoModulo("Sincronización") ||
+        tienePermiso("Sincronizacion", "Ver")
+      );
+    }
+    if (modulo.id === "actividades") {
+      if (esModuloAnuladoBD(["Actividades"])) return false;
+      return tieneAccesoModulo("Actividades") || tienePermiso("Actividades", "Ver");
+    }
+
+    if (esModuloAnuladoBD([modulo.nombre])) return false;
+    return tieneAccesoModulo(modulo.nombre) || tienePermiso(modulo.nombre, "Ver");
+  });
 
   const contenidoMenu = (
     <motion.div
@@ -173,14 +260,20 @@ export function MenuModulos() {
         oculto: {},
       }}
     >
-      {MODULOS.map((modulo) => (
-        <ModuloCard
-          key={modulo.id}
-          modulo={modulo}
-          esActivo={pathname.startsWith(modulo.ruta)}
-          onClick={() => setAbierto(false)}
-        />
-      ))}
+      {modulosPermitidos.length === 0 ? (
+        <div className="col-span-full py-8 text-center text-muted-foreground text-sm">
+          No cuenta con acceso a ningún módulo. Contacte a su administrador.
+        </div>
+      ) : (
+        modulosPermitidos.map((modulo) => (
+          <ModuloCard
+            key={modulo.id}
+            modulo={modulo}
+            esActivo={pathname.startsWith(modulo.ruta)}
+            onClick={() => setAbierto(false)}
+          />
+        ))
+      )}
     </motion.div>
   );
 
