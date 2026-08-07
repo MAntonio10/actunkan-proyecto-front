@@ -75,11 +75,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { Spinner } from '@/components/ui/spinner'
 
 import { api } from '@/lib/api'
-import { useAutenticacion } from '@/contexto/contexto_autenticacion'
+import { useAutenticacion, ACCESO_TEMPORAL_DEV } from '@/contexto/contexto_autenticacion'
 import { RutaProtegida } from '@/componentes/ruta_protegida'
 import {
   UsuarioBackend,
@@ -100,6 +100,7 @@ const esquemaCrearUsuario = z.object({
 
 const esquemaEditarUsuario = z.object({
   nombre: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
+  correo: z.string().email('Ingrese un correo electrónico válido'),
   telefono: z.string().min(8, 'Ingrese un teléfono válido'),
   idPuesto: z.coerce.number().min(1, 'Seleccione un puesto de trabajo'),
 })
@@ -148,6 +149,7 @@ export default function ModuloUsuariosHubPage() {
 
   const esModuloDeshabilitadoBD = useCallback(
     (nombre: string) => {
+      if (ACCESO_TEMPORAL_DEV) return false
       const m = modulos.find((mod) => mod.nombre.toLowerCase().trim() === nombre.toLowerCase().trim())
       return m ? m.anulado : false
     },
@@ -327,14 +329,11 @@ export default function ModuloUsuariosHubPage() {
       haCargadoInicialRef.current = true
       const tabDefecto = puedeVerUsuarios
         ? 'usuarios'
-        : puedeVerPuestos
-          ? 'puestos'
-          : 'permisos'
+        : 'puestos'
 
       const tabValida =
         (pestanaActiva === 'usuarios' && puedeVerUsuarios) ||
-        (pestanaActiva === 'puestos' && puedeVerPuestos) ||
-        (pestanaActiva === 'permisos' && puedeVerPermisos)
+        (pestanaActiva === 'puestos' && puedeVerPuestos)
 
       const target = tabValida ? pestanaActiva : tabDefecto
       if (!tabValida) {
@@ -342,7 +341,7 @@ export default function ModuloUsuariosHubPage() {
       }
       cargarDatos(target)
     }
-  }, [usuarioId, puedeVerUsuarios, puedeVerPuestos, puedeVerPermisos, pestanaActiva, cargarDatos])
+  }, [usuarioId, puedeVerUsuarios, puedeVerPuestos, pestanaActiva, cargarDatos])
 
   // --- FORMS ---
   const formCrearU = useForm<FormCrearUsuario>({ resolver: zodResolver(esquemaCrearUsuario) })
@@ -436,6 +435,7 @@ export default function ModuloUsuariosHubPage() {
   const handleAbrirEditarUsuario = (u: UsuarioBackend) => {
     setUsuarioEditando(u)
     formEditarU.setValue('nombre', u.nombre)
+    formEditarU.setValue('correo', u.correo)
     formEditarU.setValue('telefono', u.telefono)
     formEditarU.setValue('idPuesto', u.idPuesto)
     setModalEditarUsuarioAbierto(true)
@@ -503,12 +503,42 @@ export default function ModuloUsuariosHubPage() {
     }
   }
 
-  const togglePermiso = (idModuloAccion: number) => {
-    setIdsPermisosSeleccionados((prev) =>
-      prev.includes(idModuloAccion)
-        ? prev.filter((id) => id !== idModuloAccion)
-        : [...prev, idModuloAccion]
+  const togglePermiso = (maTarget: ModuloAccionBackend, checked: boolean) => {
+    const esVer = maTarget.accion?.nombre?.toLowerCase().trim() === 'ver'
+    const asociacionesModulo = moduloAcciones.filter((ma) => ma.idModulo === maTarget.idModulo)
+    const permisoVer = asociacionesModulo.find(
+      (ma) => ma.accion?.nombre?.toLowerCase().trim() === 'ver'
     )
+
+    setIdsPermisosSeleccionados((prev) => {
+      const set = new Set(prev)
+      if (checked) {
+        set.add(maTarget.id)
+        if (!esVer && permisoVer) {
+          set.add(permisoVer.id)
+        }
+      } else {
+        set.delete(maTarget.id)
+        if (esVer) {
+          asociacionesModulo.forEach((ma) => set.delete(ma.id))
+        }
+      }
+      return Array.from(set)
+    })
+  }
+
+  const toggleTodosModulo = (idModulo: number, checked: boolean) => {
+    const idsModulo = moduloAcciones
+      .filter((ma) => ma.idModulo === idModulo)
+      .map((ma) => ma.id)
+
+    setIdsPermisosSeleccionados((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...idsModulo]))
+      } else {
+        return prev.filter((id) => !idsModulo.includes(id))
+      }
+    })
   }
 
   const handleGuardarPermisos = async () => {
@@ -848,22 +878,13 @@ export default function ModuloUsuariosHubPage() {
                   <span>Puestos</span>
                 </TabsTrigger>
               )}
-              {puedeVerPermisos && (
-                <TabsTrigger
-                  value="permisos"
-                  className="flex items-center gap-2.5 px-4 py-2 text-sm font-medium rounded-lg whitespace-nowrap"
-                >
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>Módulos & Permisos</span>
-                </TabsTrigger>
-              )}
             </TabsList>
 
-            {!puedeVerUsuarios && !puedeVerPuestos && !puedeVerPermisos && (
+            {!puedeVerUsuarios && !puedeVerPuestos && (
               <Card className="p-8 text-center border-dashed">
                 <CardTitle className="text-destructive">Sin Acceso a Submódulos</CardTitle>
                 <CardDescription className="mt-2">
-                  No cuenta con permisos asignados para visualizar Usuarios, Puestos o Módulos. Contacte a su administrador.
+                  No cuenta con permisos asignados para visualizar Usuarios o Puestos. Contacte a su administrador.
                 </CardDescription>
               </Card>
             )}
@@ -1241,284 +1262,8 @@ export default function ModuloUsuariosHubPage() {
             </Card>
           </TabsContent>
         )}
-
-          {/* ============================================================ */}
-          {/* TAB 3: MÓDULOS & PERMISOS                                    */}
-          {/* ============================================================ */}
-          {puedeVerPermisos && (
-            <TabsContent value="permisos" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* COLUMNA 1: GESTIÓN DE MÓDULOS */}
-                {puedeVerModulos && (
-                  <Card className="border-border/60 bg-card">
-                    <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Layers className="h-4 w-4 text-primary" />
-                          Módulos
-                        </CardTitle>
-                        <CardDescription className="text-xs">
-                          Secciones del sistema
-                        </CardDescription>
-                      </div>
-                      {puedeCrearModulos && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setModuloEditando(null)
-                            formModulo.reset({ nombre: '' })
-                            setModalModuloAbierto(true)
-                          }}
-                        >
-                          <Plus className="h-3.5 w-3.5 mr-1" />
-                          Nuevo
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {modulos.map((m) => (
-                        <div
-                          key={m.id}
-                          className="flex items-center justify-between p-2.5 rounded-md border border-border/50 bg-muted/20 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-mono text-[10px]">
-                              ID: {m.id}
-                            </Badge>
-                            <span className="font-medium capitalize">{m.nombre}</span>
-                            {m.anulado && <Badge variant="destructive" className="text-[9px]">Anulado</Badge>}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {puedeEditarModulos && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-blue-500"
-                                onClick={() => {
-                                  setModuloEditando(m)
-                                  formModulo.reset({ nombre: m.nombre })
-                                  setModalModuloAbierto(true)
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                            {m.anulado ? (
-                              (puedeEditarModulos || puedeAnularModulos) && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-emerald-600 hover:text-emerald-700"
-                                  onClick={() => handleActivarModulo(m)}
-                                  title="Reactivar módulo"
-                                >
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                </Button>
-                              )
-                            ) : (
-                              puedeAnularModulos && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-destructive"
-                                  onClick={() => setModuloAnular(m)}
-                                  title="Anular módulo"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              )
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* COLUMNA 2: GESTIÓN DE ACCIONES */}
-                {puedeVerAcciones && (
-                  <Card className="border-border/60 bg-card">
-                    <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Sliders className="h-4 w-4 text-primary" />
-                          Acciones
-                        </CardTitle>
-                        <CardDescription className="text-xs">
-                          Permisos genéricos
-                        </CardDescription>
-                      </div>
-                      {puedeCrearAcciones && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setAccionEditando(null)
-                            formAccion.reset({ nombre: '' })
-                            setModalAccionAbierto(true)
-                          }}
-                        >
-                          <Plus className="h-3.5 w-3.5 mr-1" />
-                          Nueva
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {acciones.map((a) => (
-                        <div
-                          key={a.id}
-                          className="flex items-center justify-between p-2.5 rounded-md border border-border/50 bg-muted/20 text-sm"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="font-mono text-[10px]">
-                              ID: {a.id}
-                            </Badge>
-                            <span className="font-medium font-mono text-xs">{a.nombre}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {puedeEditarAcciones && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-blue-500"
-                                onClick={() => {
-                                  setAccionEditando(a)
-                                  formAccion.reset({ nombre: a.nombre })
-                                  setModalAccionAbierto(true)
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                            {puedeEliminarAcciones && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-destructive"
-                                onClick={() => setAccionEliminar(a)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* COLUMNA 3: VINCULACIÓN MÓDULO - ACCIÓN */}
-                {(puedeEditarModulos || puedeCrearModulos) && (
-                  <Card className="border-border/60 bg-card lg:col-span-1">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <FolderPlus className="h-4 w-4 text-primary" />
-                        Asociación Módulo-Acción
-                      </CardTitle>
-                      <CardDescription className="text-xs">
-                        Vincule qué acciones son válidas dentro de cada módulo
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="space-y-3 bg-muted/30 p-3 rounded-lg border border-border/50">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Seleccionar Módulo</Label>
-                          <Select value={idModuloVincular} onValueChange={setIdModuloVincular}>
-                            <SelectTrigger className="h-9 text-xs">
-                              <SelectValue placeholder="Escoger Módulo" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {modulos
-                                .filter((m) => !m.anulado)
-                                .map((m) => (
-                                  <SelectItem key={m.id} value={String(m.id)}>
-                                    {m.nombre}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs">Seleccionar Acción</Label>
-                          <Select value={idAccionVincular} onValueChange={setIdAccionVincular}>
-                            <SelectTrigger className="h-9 text-xs">
-                              <SelectValue placeholder="Escoger Acción" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {acciones.map((a) => (
-                                <SelectItem key={a.id} value={String(a.id)}>
-                                  {a.nombre}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <Button
-                          onClick={handleVincularModuloAccion}
-                          className="w-full h-9 text-xs"
-                          disabled={!idModuloVincular || !idAccionVincular}
-                        >
-                          <Plus className="mr-1.5 h-3.5 w-3.5" />
-                          Vincular Módulo con Acción
-                        </Button>
-                      </div>
-
-                      <ScrollArea className="h-64 pr-3">
-                        <div className="space-y-3">
-                          {moduloAccionesAgrupados.length === 0 ? (
-                            <p className="text-xs text-center text-muted-foreground py-6 border border-dashed rounded-lg">
-                              No hay vinculaciones de Módulo-Acción
-                            </p>
-                          ) : (
-                            moduloAccionesAgrupados.map((grupo) => (
-                              <div
-                                key={grupo.idModulo}
-                                className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="font-semibold text-xs flex items-center gap-1.5 text-foreground capitalize">
-                                    <Layers className="h-3.5 w-3.5 text-primary" />
-                                    {grupo.moduloNombre}
-                                  </span>
-                                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
-                                    {grupo.items.length} {grupo.items.length === 1 ? 'acción' : 'acciones'}
-                                  </Badge>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5 pt-1">
-                                  {grupo.items.map((ma) => (
-                                    <Badge
-                                      key={ma.id}
-                                      variant="secondary"
-                                      className="flex items-center gap-1.5 text-[11px] py-1 px-2.5 bg-card border border-border/60 text-foreground font-mono"
-                                    >
-                                      <span>{ma.accion?.nombre || `Acción ${ma.idAccion}`}</span>
-                                      {puedeAnularModulos && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEliminarModuloAccion(ma.id)}
-                                          className="text-muted-foreground hover:text-destructive transition-colors ml-0.5"
-                                          title="Eliminar asociación"
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </button>
-                                      )}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </ScrollArea>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </TabsContent>
-          )}
-        </Tabs>
-      </main>
+      </Tabs>
+    </main>
 
       {/* ============================================================ */}
       {/* MODALES: USUARIO (CREAR Y EDITAR)                             */}
@@ -1642,6 +1387,14 @@ export default function ModuloUsuariosHubPage() {
               )}
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="edit-correo">Correo Electrónico</Label>
+              <Input id="edit-correo" type="email" {...formEditarU.register('correo')} />
+              {formEditarU.formState.errors.correo && (
+                <p className="text-xs text-destructive">{formEditarU.formState.errors.correo.message}</p>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label htmlFor="edit-telefono">Teléfono</Label>
@@ -1708,60 +1461,99 @@ export default function ModuloUsuariosHubPage() {
 
           <div className="space-y-4 py-2">
             <p className="text-xs text-muted-foreground">
-              Marque las acciones habilitadas para este usuario agrupadas por módulo:
+              Active los permisos habilitados para este usuario en cada módulo. Al activar cualquier permiso diferente a &quot;Ver&quot;, se activará &quot;Ver&quot; automáticamente.
             </p>
 
-            <ScrollArea className="h-72 pr-3 border rounded-lg p-3 bg-muted/20 space-y-4">
+            <ScrollArea className="h-[380px] pr-3 border rounded-lg p-3 bg-muted/20">
               {modulos.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-12 gap-2 text-muted-foreground text-xs">
                   <Spinner className="h-5 w-5 text-primary" />
                   <span>Cargando módulos y permisos...</span>
                 </div>
               ) : (
-                modulos
-                  .filter((m) => !m.anulado)
-                  .map((mod) => {
-                  const asociacionesModulo = moduloAcciones.filter((ma) => ma.idModulo === mod.id)
+                <div className="space-y-4">
+                  {modulos
+                    .filter((m) => !m.anulado)
+                    .map((mod) => {
+                      const asociacionesModulo = moduloAcciones.filter((ma) => ma.idModulo === mod.id)
+                      const todosSeleccionados =
+                        asociacionesModulo.length > 0 &&
+                        asociacionesModulo.every((ma) => idsPermisosSeleccionados.includes(ma.id))
+                      const cantidadSeleccionados = asociacionesModulo.filter((ma) =>
+                        idsPermisosSeleccionados.includes(ma.id)
+                      ).length
 
-                  return (
-                    <div key={mod.id} className="space-y-2 mb-4">
-                      <div className="flex items-center gap-2 border-b border-border/50 pb-1">
-                        <Shield className="h-4 w-4 text-primary" />
-                        <span className="font-semibold text-sm capitalize">{mod.nombre}</span>
-                      </div>
+                      return (
+                        <div key={mod.id} className="rounded-lg border border-border/60 bg-card p-3 space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                            <div className="flex items-center gap-2">
+                              <Shield className="h-4 w-4 text-primary" />
+                              <span className="font-semibold text-sm capitalize">{mod.nombre}</span>
+                              {asociacionesModulo.length > 0 && (
+                                <Badge variant="outline" className="text-[10px] font-mono">
+                                  {cantidadSeleccionados} / {asociacionesModulo.length}
+                                </Badge>
+                              )}
+                            </div>
 
-                      {asociacionesModulo.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic pl-6">
-                          No hay acciones vinculadas a este módulo.
-                        </p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pl-4 pt-1">
-                          {asociacionesModulo.map((ma) => {
-                            const isChecked = idsPermisosSeleccionados.includes(ma.id)
-                            return (
-                              <label
-                                key={ma.id}
-                                className={`flex items-center gap-2 p-2 rounded-md border text-xs cursor-pointer transition-colors ${
-                                  isChecked
-                                    ? 'bg-primary/10 border-primary/40 font-medium text-foreground'
-                                    : 'bg-card border-border/60 text-muted-foreground hover:bg-muted/40'
-                                }`}
-                              >
-                                <Checkbox
-                                  checked={isChecked}
-                                  onCheckedChange={() => togglePermiso(ma.id)}
+                            {asociacionesModulo.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <Label
+                                  htmlFor={`select-all-${mod.id}`}
+                                  className="text-xs text-muted-foreground cursor-pointer select-none font-medium"
+                                >
+                                  Seleccionar todos
+                                </Label>
+                                <Switch
+                                  id={`select-all-${mod.id}`}
+                                  checked={todosSeleccionados}
+                                  onCheckedChange={(checked) => toggleTodosModulo(mod.id, checked)}
                                 />
-                                <span className="capitalize">
-                                  {ma.accion?.nombre || `Acción ${ma.idAccion}`}
-                                </span>
-                              </label>
-                            )
-                          })}
+                              </div>
+                            )}
+                          </div>
+
+                          {asociacionesModulo.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic pl-2">
+                              No hay acciones vinculadas a este módulo.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                              {asociacionesModulo.map((ma) => {
+                                const isChecked = idsPermisosSeleccionados.includes(ma.id)
+                                const esVer = ma.accion?.nombre?.toLowerCase().trim() === 'ver'
+                                const nombreAccion = ma.accion?.nombre || `Acción ${ma.idAccion}`
+
+                                return (
+                                  <div
+                                    key={ma.id}
+                                    className={`flex items-center justify-between p-2.5 rounded-md border text-xs transition-colors ${
+                                      isChecked
+                                        ? 'bg-primary/10 border-primary/40 font-medium text-foreground'
+                                        : 'bg-muted/30 border-border/60 text-muted-foreground hover:bg-muted/50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="capitalize">{nombreAccion}</span>
+                                      {esVer && (
+                                        <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">
+                                          Requerido
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <Switch
+                                      checked={isChecked}
+                                      onCheckedChange={(checked) => togglePermiso(ma, checked)}
+                                    />
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )
-                })
+                      )
+                    })}
+                </div>
               )}
             </ScrollArea>
           </div>

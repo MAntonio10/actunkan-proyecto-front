@@ -18,7 +18,7 @@ import {
   History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAutenticacion } from "@/contexto/contexto_autenticacion";
+import { useAutenticacion, ACCESO_TEMPORAL_DEV } from "@/contexto/contexto_autenticacion";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -60,13 +60,6 @@ const MODULOS: ModuloMenu[] = [
     icono: <History className="h-7 w-7" />,
     ruta: "/bitacora",
   },
-  // {
-  //   id: 'control-acceso',
-  //   nombre: 'Control Acceso',
-  //   descripcion: 'Entradas y salidas',
-  //   icono: <ScanLine className="h-7 w-7" />,
-  //   ruta: '/control-acceso',
-  // },
   {
     id: "cierre-diario",
     nombre: "Cierre Diario",
@@ -180,6 +173,7 @@ export function MenuModulos() {
   }, [abierto]);
 
   const esModuloAnuladoBD = (nombres: string[]) => {
+    if (ACCESO_TEMPORAL_DEV) return false;
     return nombres.some((n) => modulosAnulados.includes(n.toLowerCase().trim()));
   };
 

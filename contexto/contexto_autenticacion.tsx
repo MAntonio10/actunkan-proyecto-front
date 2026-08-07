@@ -22,6 +22,12 @@ interface ContextoAutenticacion {
 
 const AuthContext = createContext<ContextoAutenticacion | undefined>(undefined)
 
+// =========================================================================
+// ACCESO TEMPORAL DEV (DESARROLLO)
+// Cambiar a 'false' o borrar este valor para revertir la seguridad a normal.
+// =========================================================================
+export const ACCESO_TEMPORAL_DEV = true
+
 export function ProveedorAutenticacion({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [usuario, setUsuario] = useState<UsuarioBackend | null>(null)
@@ -92,7 +98,10 @@ export function ProveedorAutenticacion({ children }: { children: ReactNode }) {
     router.replace('/login')
   }, [usuario, router])
 
+
+
   const tieneAlgunPermiso = useCallback((): boolean => {
+    if (ACCESO_TEMPORAL_DEV) return true
     if (!usuario) return false
     const listaPermisos = usuario.permiso || (usuario as unknown as { permisos?: PermisoBackend[] }).permisos
     if (Array.isArray(listaPermisos)) {
@@ -103,6 +112,7 @@ export function ProveedorAutenticacion({ children }: { children: ReactNode }) {
 
   const tienePermiso = useCallback(
     (modulo: string, accion: string): boolean => {
+      if (ACCESO_TEMPORAL_DEV) return true
       if (!usuario) return false
       const listaPermisos = usuario.permiso || (usuario as unknown as { permisos?: PermisoBackend[] }).permisos
       if (Array.isArray(listaPermisos)) {
@@ -123,6 +133,7 @@ export function ProveedorAutenticacion({ children }: { children: ReactNode }) {
 
   const tieneAccesoModulo = useCallback(
     (modulo: string): boolean => {
+      if (ACCESO_TEMPORAL_DEV) return true
       if (!usuario) return false
       const listaPermisos = usuario.permiso || (usuario as unknown as { permisos?: PermisoBackend[] }).permisos
       if (Array.isArray(listaPermisos)) {
