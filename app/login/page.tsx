@@ -31,7 +31,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import Image from "next/image";
+import { LogosInstitucionales } from "@/componentes/logos_institucionales";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { api } from "@/lib/api";
 
@@ -277,23 +277,16 @@ export default function AutenticacionPage() {
                   "radial-gradient(circle, color-mix(in oklch, var(--primary) 35%, transparent), transparent 70%)",
               }}
             />
-            <div className="relative rounded-full bg-card/90 p-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10 backdrop-blur">
-              <Image
-                src="/Propeten.png"
-                alt="ProPeten"
-                width={120}
-                height={120}
-                priority
-                className="h-19 w-19 object-contain"
-              />
+            <div className="relative rounded-2xl bg-card/90 px-5 py-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10 backdrop-blur">
+              <LogosInstitucionales tamano="lg" prioridad />
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.35em] text-muted-foreground">
-              Parque Nacional
+            <p className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
+              Parque Regional Municipal
             </p>
             <h1 className="text-xl font-bold uppercase tracking-[0.35em] text-foreground">
-              ACTUN KAN
+              ACTÚN KAN
             </h1>
           </div>
         </div>

@@ -211,7 +211,7 @@ export default function BitacoraPage() {
   }
 
   return (
-    <RutaProtegida moduloRequerido="Auditoria">
+    <RutaProtegida moduloRequerido="Bitacora">
       <div className="min-h-screen bg-background flex flex-col">
         <BarraNavegacionSuperior />
         

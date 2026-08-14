@@ -81,15 +81,17 @@ export function RutaProtegida({
     )
   }
 
-  // Encontrar la primera ruta permitida para el usuario
+  // Primera ruta a la que el usuario sí tiene acceso, para el botón de escape
+  // cuando se le niega una pantalla. Los nombres son los que devuelve el
+  // backend; tieneAccesoModulo ignora mayúsculas y tildes.
   const obtenerRutaPermitida = () => {
-    if (tieneAccesoModulo('Registro Visitantes') || tieneAccesoModulo('Visitantes') || tieneAccesoModulo('Taquilla')) return '/registro-visitantes'
-    if (tieneAccesoModulo('Usuarios') || tieneAccesoModulo('Puestos') || tieneAccesoModulo('Modulos')) return '/usuarios'
+    if (tieneAccesoModulo('EmisionTickets')) return '/registro-visitantes'
+    if (tieneAccesoModulo('Usuarios') || tieneAccesoModulo('Puestos')) return '/usuarios'
+    if (tieneAccesoModulo('Cajas') || tieneAccesoModulo('Gastos')) return '/cierre-diario'
+    if (tieneAccesoModulo('Bitacora')) return '/bitacora'
     if (tieneAccesoModulo('Donaciones')) return '/donaciones'
-    if (tieneAccesoModulo('Cierre Diario')) return '/cierre-diario'
     if (tieneAccesoModulo('Reportes')) return '/reportes'
     if (tieneAccesoModulo('Actividades')) return '/actividades'
-    if (tieneAccesoModulo('Auditoria') || tieneAccesoModulo('Auditoría') || tieneAccesoModulo('Bitacora') || tieneAccesoModulo('Bitácora')) return '/bitacora'
     if (tieneAccesoModulo('Sincronizacion')) return '/sincronizacion'
     return '/login'
   }

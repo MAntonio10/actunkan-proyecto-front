@@ -485,9 +485,10 @@ export default function ModuloUsuariosHubPage() {
   // --- MANEJO DE PERMISOS ---
   const handleAbrirPermisosModal = async (u: UsuarioBackend) => {
     setUsuarioPermisos(u)
-    const idsActuales = u.permiso?.map((p) => p.idModuloAccion) || []
-    setIdsPermisosSeleccionados(idsActuales)
+    setIdsPermisosSeleccionados([])
     setModalPermisosAbierto(true)
+
+    let asignables = moduloAcciones
 
     if (modulos.length === 0 || moduloAcciones.length === 0) {
       try {
@@ -498,9 +499,20 @@ export default function ModuloUsuariosHubPage() {
         ])
         setModulos(Array.isArray(resModulos) ? resModulos : [])
         setAcciones(Array.isArray(resAcciones) ? resAcciones : [])
-        setModuloAcciones(Array.isArray(resModuloAcciones) ? resModuloAcciones : [])
+        asignables = Array.isArray(resModuloAcciones) ? resModuloAcciones : []
+        setModuloAcciones(asignables)
       } catch {}
     }
+
+    // El usuario puede arrastrar permisos sobre módulos de infraestructura
+    // (Modulos, Acciones) concedidos antes de que el backend los marcara como
+    // no asignables. Reenviarlos provoca un 400, así que se descartan aquí:
+    // GET /modulo-acciones ya devuelve únicamente los asignables.
+    const idsAsignables = new Set(asignables.map((ma) => ma.id))
+    const idsActuales = (u.permiso?.map((p) => p.idModuloAccion) || []).filter((id) =>
+      idsAsignables.has(id)
+    )
+    setIdsPermisosSeleccionados(idsActuales)
   }
 
   const togglePermiso = (maTarget: ModuloAccionBackend, checked: boolean) => {
@@ -545,9 +557,15 @@ export default function ModuloUsuariosHubPage() {
     if (!usuarioPermisos) return
     setGuardandoPermisos(true)
     try {
+      // Red de seguridad: solo se envían ids que siguen existiendo en el
+      // catálogo asignable, para no reenviar permisos de módulos anulados o de
+      // infraestructura que el backend rechaza con 400.
+      const idsAsignables = new Set(moduloAcciones.map((ma) => ma.id))
+      const idsAEnviar = idsPermisosSeleccionados.filter((id) => idsAsignables.has(id))
+
       const usuarioActualizado = await api.usuarios.asignarPermisos(
         usuarioPermisos.id,
-        idsPermisosSeleccionados
+        idsAEnviar
       )
       setUsuarios((prev) =>
         prev.map((u) => (u.id === usuarioActualizado.id ? usuarioActualizado : u))
@@ -1042,10 +1060,12 @@ export default function ModuloUsuariosHubPage() {
                                           Editar Datos
                                         </DropdownMenuItem>
 
-                                        <DropdownMenuItem onClick={() => handleAbrirPermisosModal(u)}>
-                                          <Key className="mr-2 h-4 w-4 text-amber-500" />
-                                          Gestionar Permisos
-                                        </DropdownMenuItem>
+                                        {u.id !== usuario?.id && (
+                                          <DropdownMenuItem onClick={() => handleAbrirPermisosModal(u)}>
+                                            <Key className="mr-2 h-4 w-4 text-amber-500" />
+                                            Gestionar Permisos
+                                          </DropdownMenuItem>
+                                        )}
                                       </>
                                     )}
 
@@ -1473,7 +1493,14 @@ export default function ModuloUsuariosHubPage() {
               ) : (
                 <div className="space-y-4">
                   {modulos
-                    .filter((m) => !m.anulado)
+                    .filter(
+                      (m) =>
+                        !m.anulado &&
+                        m.esAsignable !== false &&
+                        // GET /modulo-acciones ya viene filtrado a lo asignable:
+                        // un módulo sin asociaciones ahí no se puede conceder.
+                        moduloAcciones.some((ma) => ma.idModulo === m.id)
+                    )
                     .map((mod) => {
                       const asociacionesModulo = moduloAcciones.filter((ma) => ma.idModulo === mod.id)
                       const todosSeleccionados =

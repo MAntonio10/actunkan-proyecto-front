@@ -1,7 +1,7 @@
 {
-  "name": "Parque Nacional Actun Kan - Sistema de Tickets",
-  "short_name": "Actun Kan",
-  "description": "Sistema de gestion de tickets y visitantes del Parque Nacional Actun Kan",
+  "name": "Parque Regional Municipal Actún Kan - Sistema de Tickets",
+  "short_name": "Actún Kan",
+  "description": "Sistema de gestión de tickets y visitantes del Parque Regional Municipal Actún Kan",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f5f1e6",

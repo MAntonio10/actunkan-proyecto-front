@@ -1,4 +1,4 @@
-// Tipos para el sistema de tickets del Parque Nacional Actun Kan
+// Tipos para el sistema de tickets del Parque Regional Municipal Actún Kan
 
 // Enums
 export type Nacionalidad = 
@@ -354,9 +354,13 @@ export const ORIGENES_VISITANTE: { valor: OrigenVisitante; etiqueta: string }[] 
   { valor: 'extranjero', etiqueta: 'Extranjero' },
 ]
 
+// El nombre visible de cada atracción lo sirve GET /tickets/catalogos; esta
+// lista quedó sin uso tras conectar el módulo y solo se mantiene como
+// referencia de los códigos. 'mariposario' es la clave estable en base de
+// datos aunque la atracción se llame ahora Biblioteca Ambiental.
 export const ATRACCIONES_VISITANTE: { valor: AtraccionVisitante; etiqueta: string; descripcion: string }[] = [
-  { valor: 'cuevas', etiqueta: 'Cuevas Actun Kan', descripcion: 'Recorrido en cavernas naturales' },
-  { valor: 'mariposario', etiqueta: 'Mariposario', descripcion: 'Santuario de mariposas tropicales' },
+  { valor: 'cuevas', etiqueta: 'Cuevas Actún Kan', descripcion: 'Recorrido en cavernas naturales' },
+  { valor: 'mariposario', etiqueta: 'Biblioteca Ambiental', descripcion: 'Espacio de educación ambiental' },
 ]
 
 export const CATEGORIAS_VISITANTE: { valor: CategoriaVisitante; etiqueta: string; descripcion: string }[] = [
@@ -383,6 +387,8 @@ export interface TicketEmitido {
   nombre_visitante: string
   atraccion: AtraccionVisitante
   origen: OrigenVisitante
+  pais_id?: number
+  pais?: string
   tipo_recorrido: 'corto' | 'largo'
   cantidad_personas: number
   monto_total: number
@@ -463,6 +469,214 @@ export const GUIAS_DEMO: Guia[] = [
   { id: 'g3', nombre: 'Pedro Ak\'abal', numero_carnet: '', tiene_carnet: false },
 ]
 
+// País de origen del visitante extranjero.
+// PAISES_DEMO es un catálogo temporal en el frontend: el backend debe exponer
+// un catálogo real de países (tabla propia) y este listado debe reemplazarse
+// por una llamada a ese endpoint (ver docs/modulo-emision-tickets.md).
+export interface PaisBackend {
+  id: number
+  nombre: string
+  codigoIso?: string
+}
+
+export const PAISES_DEMO: PaisBackend[] = [
+  { id: 1, nombre: 'Afganistán' },
+  { id: 2, nombre: 'Albania' },
+  { id: 3, nombre: 'Alemania' },
+  { id: 4, nombre: 'Andorra' },
+  { id: 5, nombre: 'Angola' },
+  { id: 6, nombre: 'Antigua y Barbuda' },
+  { id: 7, nombre: 'Arabia Saudita' },
+  { id: 8, nombre: 'Argelia' },
+  { id: 9, nombre: 'Argentina' },
+  { id: 10, nombre: 'Armenia' },
+  { id: 11, nombre: 'Australia' },
+  { id: 12, nombre: 'Austria' },
+  { id: 13, nombre: 'Azerbaiyán' },
+  { id: 14, nombre: 'Bahamas' },
+  { id: 15, nombre: 'Baréin' },
+  { id: 16, nombre: 'Bangladés' },
+  { id: 17, nombre: 'Barbados' },
+  { id: 18, nombre: 'Bélgica' },
+  { id: 19, nombre: 'Belice' },
+  { id: 20, nombre: 'Benín' },
+  { id: 21, nombre: 'Bielorrusia' },
+  { id: 22, nombre: 'Birmania (Myanmar)' },
+  { id: 23, nombre: 'Bolivia' },
+  { id: 24, nombre: 'Bosnia y Herzegovina' },
+  { id: 25, nombre: 'Botsuana' },
+  { id: 26, nombre: 'Brasil' },
+  { id: 27, nombre: 'Brunéi' },
+  { id: 28, nombre: 'Bulgaria' },
+  { id: 29, nombre: 'Burkina Faso' },
+  { id: 30, nombre: 'Burundi' },
+  { id: 31, nombre: 'Bután' },
+  { id: 32, nombre: 'Cabo Verde' },
+  { id: 33, nombre: 'Camboya' },
+  { id: 34, nombre: 'Camerún' },
+  { id: 35, nombre: 'Canadá' },
+  { id: 36, nombre: 'Catar' },
+  { id: 37, nombre: 'Chad' },
+  { id: 38, nombre: 'Chile' },
+  { id: 39, nombre: 'China' },
+  { id: 40, nombre: 'Chipre' },
+  { id: 41, nombre: 'Colombia' },
+  { id: 42, nombre: 'Comoras' },
+  { id: 43, nombre: 'Corea del Norte' },
+  { id: 44, nombre: 'Corea del Sur' },
+  { id: 45, nombre: 'Costa de Marfil' },
+  { id: 46, nombre: 'Costa Rica' },
+  { id: 47, nombre: 'Croacia' },
+  { id: 48, nombre: 'Cuba' },
+  { id: 49, nombre: 'Dinamarca' },
+  { id: 50, nombre: 'Dominica' },
+  { id: 51, nombre: 'Ecuador' },
+  { id: 52, nombre: 'Egipto' },
+  { id: 53, nombre: 'El Salvador' },
+  { id: 54, nombre: 'Emiratos Árabes Unidos' },
+  { id: 55, nombre: 'Eritrea' },
+  { id: 56, nombre: 'Eslovaquia' },
+  { id: 57, nombre: 'Eslovenia' },
+  { id: 58, nombre: 'España' },
+  { id: 59, nombre: 'Estados Unidos' },
+  { id: 60, nombre: 'Estonia' },
+  { id: 61, nombre: 'Esuatini (Suazilandia)' },
+  { id: 62, nombre: 'Etiopía' },
+  { id: 63, nombre: 'Filipinas' },
+  { id: 64, nombre: 'Finlandia' },
+  { id: 65, nombre: 'Fiyi' },
+  { id: 66, nombre: 'Francia' },
+  { id: 67, nombre: 'Gabón' },
+  { id: 68, nombre: 'Gambia' },
+  { id: 69, nombre: 'Georgia' },
+  { id: 70, nombre: 'Ghana' },
+  { id: 71, nombre: 'Granada' },
+  { id: 72, nombre: 'Grecia' },
+  { id: 73, nombre: 'Guatemala' },
+  { id: 74, nombre: 'Guinea' },
+  { id: 75, nombre: 'Guinea-Bisáu' },
+  { id: 76, nombre: 'Guinea Ecuatorial' },
+  { id: 77, nombre: 'Guyana' },
+  { id: 78, nombre: 'Haití' },
+  { id: 79, nombre: 'Honduras' },
+  { id: 80, nombre: 'Hungría' },
+  { id: 81, nombre: 'India' },
+  { id: 82, nombre: 'Indonesia' },
+  { id: 83, nombre: 'Irak' },
+  { id: 84, nombre: 'Irán' },
+  { id: 85, nombre: 'Irlanda' },
+  { id: 86, nombre: 'Islandia' },
+  { id: 87, nombre: 'Islas Marshall' },
+  { id: 88, nombre: 'Islas Salomón' },
+  { id: 89, nombre: 'Israel' },
+  { id: 90, nombre: 'Italia' },
+  { id: 91, nombre: 'Jamaica' },
+  { id: 92, nombre: 'Japón' },
+  { id: 93, nombre: 'Jordania' },
+  { id: 94, nombre: 'Kazajistán' },
+  { id: 95, nombre: 'Kenia' },
+  { id: 96, nombre: 'Kirguistán' },
+  { id: 97, nombre: 'Kiribati' },
+  { id: 98, nombre: 'Kosovo' },
+  { id: 99, nombre: 'Kuwait' },
+  { id: 100, nombre: 'Laos' },
+  { id: 101, nombre: 'Lesoto' },
+  { id: 102, nombre: 'Letonia' },
+  { id: 103, nombre: 'Líbano' },
+  { id: 104, nombre: 'Liberia' },
+  { id: 105, nombre: 'Libia' },
+  { id: 106, nombre: 'Liechtenstein' },
+  { id: 107, nombre: 'Lituania' },
+  { id: 108, nombre: 'Luxemburgo' },
+  { id: 109, nombre: 'Madagascar' },
+  { id: 110, nombre: 'Malasia' },
+  { id: 111, nombre: 'Malaui' },
+  { id: 112, nombre: 'Maldivas' },
+  { id: 113, nombre: 'Malí' },
+  { id: 114, nombre: 'Malta' },
+  { id: 115, nombre: 'Marruecos' },
+  { id: 116, nombre: 'Mauricio' },
+  { id: 117, nombre: 'Mauritania' },
+  { id: 118, nombre: 'México' },
+  { id: 119, nombre: 'Micronesia' },
+  { id: 120, nombre: 'Moldavia' },
+  { id: 121, nombre: 'Mónaco' },
+  { id: 122, nombre: 'Mongolia' },
+  { id: 123, nombre: 'Montenegro' },
+  { id: 124, nombre: 'Mozambique' },
+  { id: 125, nombre: 'Namibia' },
+  { id: 126, nombre: 'Nauru' },
+  { id: 127, nombre: 'Nepal' },
+  { id: 128, nombre: 'Nicaragua' },
+  { id: 129, nombre: 'Níger' },
+  { id: 130, nombre: 'Nigeria' },
+  { id: 131, nombre: 'Noruega' },
+  { id: 132, nombre: 'Nueva Zelanda' },
+  { id: 133, nombre: 'Omán' },
+  { id: 134, nombre: 'Países Bajos' },
+  { id: 135, nombre: 'Pakistán' },
+  { id: 136, nombre: 'Palaos' },
+  { id: 137, nombre: 'Palestina' },
+  { id: 138, nombre: 'Panamá' },
+  { id: 139, nombre: 'Papúa Nueva Guinea' },
+  { id: 140, nombre: 'Paraguay' },
+  { id: 141, nombre: 'Perú' },
+  { id: 142, nombre: 'Polonia' },
+  { id: 143, nombre: 'Portugal' },
+  { id: 144, nombre: 'Reino Unido' },
+  { id: 145, nombre: 'República Centroafricana' },
+  { id: 146, nombre: 'República Checa' },
+  { id: 147, nombre: 'República del Congo' },
+  { id: 148, nombre: 'República Democrática del Congo' },
+  { id: 149, nombre: 'República Dominicana' },
+  { id: 150, nombre: 'Ruanda' },
+  { id: 151, nombre: 'Rumanía' },
+  { id: 152, nombre: 'Rusia' },
+  { id: 153, nombre: 'Samoa' },
+  { id: 154, nombre: 'San Cristóbal y Nieves' },
+  { id: 155, nombre: 'San Marino' },
+  { id: 156, nombre: 'San Vicente y las Granadinas' },
+  { id: 157, nombre: 'Santa Lucía' },
+  { id: 158, nombre: 'Santo Tomé y Príncipe' },
+  { id: 159, nombre: 'Senegal' },
+  { id: 160, nombre: 'Serbia' },
+  { id: 161, nombre: 'Seychelles' },
+  { id: 162, nombre: 'Sierra Leona' },
+  { id: 163, nombre: 'Singapur' },
+  { id: 164, nombre: 'Siria' },
+  { id: 165, nombre: 'Somalia' },
+  { id: 166, nombre: 'Sri Lanka' },
+  { id: 167, nombre: 'Sudáfrica' },
+  { id: 168, nombre: 'Sudán' },
+  { id: 169, nombre: 'Sudán del Sur' },
+  { id: 170, nombre: 'Suecia' },
+  { id: 171, nombre: 'Suiza' },
+  { id: 172, nombre: 'Surinam' },
+  { id: 173, nombre: 'Tailandia' },
+  { id: 174, nombre: 'Taiwán' },
+  { id: 175, nombre: 'Tanzania' },
+  { id: 176, nombre: 'Tayikistán' },
+  { id: 177, nombre: 'Timor Oriental' },
+  { id: 178, nombre: 'Togo' },
+  { id: 179, nombre: 'Tonga' },
+  { id: 180, nombre: 'Trinidad y Tobago' },
+  { id: 181, nombre: 'Túnez' },
+  { id: 182, nombre: 'Turkmenistán' },
+  { id: 183, nombre: 'Turquía' },
+  { id: 184, nombre: 'Tuvalu' },
+  { id: 185, nombre: 'Ucrania' },
+  { id: 186, nombre: 'Uganda' },
+  { id: 187, nombre: 'Uruguay' },
+  { id: 188, nombre: 'Uzbekistán' },
+  { id: 189, nombre: 'Vanuatu' },
+  { id: 190, nombre: 'Vaticano' },
+  { id: 191, nombre: 'Venezuela' },
+  { id: 192, nombre: 'Vietnam' },
+  { id: 193, nombre: 'Yemen' },
+  { id: 194, nombre: 'Yibuti' },
+  { id: 195, nombre: 'Zambia' },
+  { id: 196, nombre: 'Zimbabue' },
+]
 
 export type MetodoPago = 'efectivo' | 'tarjeta'
 
@@ -657,7 +871,24 @@ export interface ModuloBackend {
   anulado: boolean
   fechaCreacion: string
   fechaActualizacion: string
+  // Los módulos de infraestructura (Modulos, Acciones) tienen esAsignable=false:
+  // existen para armar el menú y la pantalla de permisos, pero el backend
+  // rechaza con 400 cualquier intento de concederlos a un usuario.
+  esAsignable?: boolean
+  idModuloPadre?: number | null
+  moduloPadre?: { id: number; nombre: string } | null
   moduloAcciones?: ModuloAccionBackend[]
+}
+
+// Respuesta de GET /modulos/mis-modulos: un elemento por módulo accesible,
+// con las acciones efectivamente concedidas al usuario de la sesión.
+export interface ModuloMenu {
+  id: number
+  nombre: string
+  esAsignable: boolean
+  idModuloPadre: number | null
+  moduloPadre?: { id: number; nombre: string } | null
+  acciones: string[]
 }
 
 export interface ModuloAccionBackend {
@@ -688,9 +919,254 @@ export interface UsuarioBackend {
   permiso?: PermisoBackend[]
 }
 
-export interface RespuestaLogin {
+export interface RespuestaTokens {
   access_token: string
+  refresh_token: string
   token_type: string
+  expires_in: string
+  refresh_expira: string
+}
+
+export interface RespuestaLogin extends RespuestaTokens {
   usuario: UsuarioBackend
+}
+
+export interface SesionBackend {
+  id: number
+  fechaCreacion: string
+  fechaExpira: string
+  ip?: string
+  dispositivo?: string
+  esActual?: boolean
+}
+
+// ==========================================
+// Emisión de Tickets (módulo EmisionTickets)
+// ==========================================
+
+// Los catálogos usan `codigo` como clave estable de negocio; `nombre` es solo
+// presentación. Las reglas dependen del codigo, nunca del nombre.
+export interface CatalogoCodificado {
+  id: number
+  codigo: string
+  nombre: string
+}
+
+export interface PaisCatalogo {
+  id: number
+  nombre: string
+  codigoIso?: string
+}
+
+export interface OpcionPagoCatalogo {
+  id: number
+  nombre: string
+  esEfectivo: boolean
+}
+
+export interface GuiaCatalogo {
+  id: number
+  nombre: string
+  tieneCarnet: boolean
+}
+
+export interface TarifaBackend {
+  idAtraccion: number
+  idOrigen: number
+  idTipoVisitante: number
+  precio: string
+}
+
+export interface CatalogosTickets {
+  atracciones: CatalogoCodificado[]
+  origenes: CatalogoCodificado[]
+  paises: PaisCatalogo[]
+  tiposVisitante: CatalogoCodificado[]
+  tiposRecorrido: CatalogoCodificado[]
+  opcionesPago: OpcionPagoCatalogo[]
+  guias: GuiaCatalogo[]
+  tarifas: TarifaBackend[]
+  precioTicketGuia: string
+}
+
+export interface VisitantePorTicket {
+  idTipoVisitante: number
+  cantidad: number
+  precioUnitario: string
+  subtotal: string
+}
+
+export interface TicketPago {
+  idOpcionPago: number
+  monto: string
+}
+
+export interface TicketBackend {
+  id: number
+  numeroTicket: string
+  tipoTicket: 'VISITANTE' | 'GUIA'
+  nombre?: string
+  cantidadPersonas: number
+  montoTotal: string
+  // `qr` es la cadena exacta que debe codificarse en el código QR impreso.
+  qr?: string
+  qrFirma?: string
+  atraccion?: CatalogoCodificado
+  origen?: CatalogoCodificado
+  pais?: PaisCatalogo | null
+  tipoRecorrido?: CatalogoCodificado
+  nombreGuia?: string
+  tieneCarnetGuia?: boolean
+  fechaCreacion?: string
+  fechaUso?: string | null
+  anulado?: boolean
+  visitantePorTickets?: VisitantePorTicket[]
+  ticketPagos?: TicketPago[]
+}
+
+export interface RespuestaEmisionTicket {
+  idGrupoEmision: number
+  montoVisitantes: string
+  montoGuia: string
+  montoTotalGeneral: string
+  tickets: TicketBackend[]
+}
+
+export interface GuiaEmision {
+  modo: 'existente' | 'nuevo'
+  idGuia?: number
+  nombre?: string
+  tieneCarnet?: boolean
+  numeroCarnet?: string
+  idOpcionPagoGuia?: number
+}
+
+export interface PayloadEmisionTicket {
+  nombreGrupo: string
+  idAtraccion: number
+  idOrigen: number
+  idPais: number | null
+  idTipoRecorrido: number
+  cantidades: { idTipoVisitante: number; cantidad: number }[]
+  idOpcionPago: number
+  notas?: string
+  guia?: GuiaEmision
+}
+
+export interface FiltrosTickets {
+  buscar?: string
+  idAtraccion?: number
+  idOpcionPago?: number
+  idOrigen?: number
+  idPais?: number
+  fechaInicio?: string
+  fechaFin?: string
+  incluirAnulados?: boolean
+  pagina?: number
+  limite?: number
+}
+
+export interface MetricasTickets {
+  totalTickets: number
+  totalPersonas: number
+  montoRecaudado: string
+}
+
+export interface RespuestaHistorialTickets {
+  datos: TicketBackend[]
+  total: number
+  pagina: number
+  limite: number
+  metricas: MetricasTickets
+}
+
+export interface RespuestaValidacionTicket {
+  valido: boolean
+  mensaje: string
+  ticket?: TicketBackend
+}
+
+// ==========================================
+// Cajas y Gastos (módulo Cajas + sub-módulo Gastos)
+// ==========================================
+
+// Los montos llegan como cadena decimal desde el backend (ej. "500.0000").
+export interface EstadoCaja {
+  id: number
+  nombre: string
+}
+
+export interface CierreCajaBackend {
+  id: number
+  idApertura: number
+  fechaCierre: string
+  montoFinal: string
+  montoEsperado: string
+  diferencia: string
+  observaciones?: string
+  anulado: boolean
+}
+
+export interface TipoGastoBackend {
+  id: number
+  nombre: string
+  anulado: boolean
+  _count?: { gastos: number }
+}
+
+export interface GastoBackend {
+  id: number
+  idTipoGasto: number
+  idAperturaCaja: number
+  idUsuario: number
+  descripcion: string
+  monto: string
+  anulado: boolean
+  fechaCreacion: string
+  fechaActualizacion: string
+  tipoGasto?: TipoGastoBackend
+}
+
+export interface AperturaCajaBackend {
+  id: number
+  idUsuario: number
+  montoInicial: string
+  observaciones?: string
+  anulado: boolean
+  fechaCreacion: string
+  fechaActualizacion: string
+  usuario?: { id: number; nombre: string; correo: string }
+  estado?: EstadoCaja
+  cierresCaja?: CierreCajaBackend[]
+  gastos?: GastoBackend[]
+}
+
+// GET /cajas/actual devuelve un envoltorio, no la caja directamente: el estado
+// "no hay caja abierta" queda explícito en lugar de llegar como null.
+export interface RespuestaCajaActual {
+  hayCajaAbierta: boolean
+  caja: AperturaCajaBackend | null
+}
+
+// Los importes pueden llegar como número o como cadena Decimal ("1600.0000"),
+// según cómo serialice cada endpoint: conviértalos antes de operar con ellos.
+export interface ArqueoCaja {
+  idApertura: number
+  montoInicial: number | string
+  ventasEfectivo: number | string
+  totalGastos: number | string
+  montoEsperado: number | string
+}
+
+export interface RespuestaCierreCaja {
+  apertura: AperturaCajaBackend
+  cierre: CierreCajaBackend
+}
+
+export interface FiltrosCajas {
+  estado?: string
+  fechaInicio?: string
+  fechaFin?: string
+  incluirAnulados?: boolean
 }
 

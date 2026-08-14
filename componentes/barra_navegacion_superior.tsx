@@ -1,13 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { LogOut, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { MenuModulos } from "./menu_modulos";
 import { IndicadorConectividad } from "./indicador_conectividad";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
-import Image from "next/image";
+import { LogosInstitucionales } from "./logos_institucionales";
 import { motion } from "framer-motion";
 
 export function BarraNavegacionSuperior() {
@@ -64,34 +69,27 @@ export function BarraNavegacionSuperior() {
             transition={{ delay: 0.1, duration: 0.3 }}
           >
             <motion.div
-              whileHover={{ rotate: -8, scale: 1.06 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.97 }}
               transition={{ type: "spring", stiffness: 320, damping: 18 }}
               className="relative"
             >
               {/* Resplandor sutil detras del medallon */}
               <span
                 aria-hidden
-                className="absolute inset-0 -m-1 rounded-full blur-lg"
+                className="absolute inset-0 -m-1 rounded-2xl blur-lg"
                 style={{
                   background:
                     "radial-gradient(circle, color-mix(in oklch, var(--primary) 30%, transparent), transparent 70%)",
                 }}
               />
-              <span className="relative flex h-14 w-14 items-center justify-center rounded-full bg-card p-1.5 ring-2 ring-primary/30 shadow-md shadow-primary/15">
-                <Image
-                  src="/actun.png"
-                  alt="Actun Kan"
-                  width={56}
-                  height={56}
-                  className="h-12 w-12 object-contain"
-                  priority
-                />
+              <span className="relative flex items-center justify-center rounded-2xl bg-card px-3 py-1.5 ring-2 ring-primary/30 shadow-md shadow-primary/15">
+                <LogosInstitucionales tamano="sm" prioridad />
               </span>
             </motion.div>
             <div className="flex items-center gap-1.5 leading-none">
               <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground hidden sm:inline">
-                Parque Nacional ACTUN KAN
+                Parque Regional Municipal ACTÚN KAN
               </span>
             </div>
           </motion.div>
@@ -121,16 +119,37 @@ export function BarraNavegacionSuperior() {
             </Avatar>
           </div>
 
+          {/* Sesiones activas */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => router.push("/sesiones")}
+                className="text-muted-foreground hover:text-primary"
+              >
+                <MonitorSmartphone className="h-5 w-5" />
+                <span className="sr-only">Mis sesiones activas</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Mis sesiones activas</TooltipContent>
+          </Tooltip>
+
           {/* Boton de salir rapido */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleCerrarSesion}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <LogOut className="h-5 w-5" />
-            <span className="sr-only">Cerrar sesion</span>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCerrarSesion}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <LogOut className="h-5 w-5" />
+                <span className="sr-only">Cerrar sesion</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Cerrar sesión</TooltipContent>
+          </Tooltip>
         </motion.div>
       </div>
     </motion.header>

@@ -10,9 +10,9 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Parque Nacional Actun Kan - Sistema de Tickets",
+  title: "Parque Regional Municipal Actún Kan - Sistema de Tickets",
   description:
-    "Sistema de gestion de tickets y visitantes del Parque Nacional Actun Kan",
+    "Sistema de gestión de tickets y visitantes del Parque Regional Municipal Actún Kan",
   generator: "v0.app",
   manifest: "/manifest.json",
   icons: {

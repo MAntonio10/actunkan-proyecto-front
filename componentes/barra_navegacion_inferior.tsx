@@ -1,180 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
-import {
-  Home,
-  ClipboardList,
-  BarChart3,
-  ChevronUp,
-  Calculator,
-  CloudCog,
-  Users,
-  Heart,
-  History,
-} from "lucide-react";
+import { ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
-import { api } from "@/lib/api";
-
-interface ItemNav {
-  id: string;
-  nombre: string;
-  icono: React.ReactNode;
-  ruta: string;
-}
-
-const TODOS_LOS_MODULOS: ItemNav[] = [
-  {
-    id: "inicio",
-    nombre: "Inicio",
-    icono: <Home className="h-5 w-5" />,
-    ruta: "/registro-visitantes",
-  },
-  {
-    id: "usuarios",
-    nombre: "Usuarios",
-    icono: <Users className="h-5 w-5" />,
-    ruta: "/usuarios",
-  },
-  {
-    id: "cierre-diario",
-    nombre: "Cierre",
-    icono: <Calculator className="h-5 w-5" />,
-    ruta: "/cierre-diario",
-  },
-  {
-    id: "reportes",
-    nombre: "Reportes",
-    icono: <BarChart3 className="h-5 w-5" />,
-    ruta: "/reportes",
-  },
-  {
-    id: "actividades",
-    nombre: "Actividades",
-    icono: <ClipboardList className="h-5 w-5" />,
-    ruta: "/actividades",
-  },
-  {
-    id: "donaciones",
-    nombre: "Donativos",
-    icono: <Heart className="h-5 w-5" />,
-    ruta: "/donaciones",
-  },
-  {
-    id: "bitacora",
-    nombre: "Bitácora",
-    icono: <History className="h-5 w-5" />,
-    ruta: "/bitacora",
-  },
-  {
-    id: "sincronizacion",
-    nombre: "Sync",
-    icono: <CloudCog className="h-5 w-5" />,
-    ruta: "/sincronizacion",
-  },
-];
+import { resolverModulosPermitidos, type ItemModulo } from "./modulos_navegacion";
 
 const SPRING_SUAVE = { type: "spring" as const, stiffness: 380, damping: 32 };
 
 export function BarraNavegacionInferior() {
   const pathname = usePathname();
   const [expandido, setExpandido] = useState(false);
-  const [modulosAnulados, setModulosAnulados] = useState<string[]>([]);
-  const { tieneAccesoModulo, tienePermiso, tieneAlgunPermiso, usuario } = useAutenticacion();
-
-  useEffect(() => {
-    if (usuario) {
-      api.modulos
-        .getModulos(true)
-        .then((res) => {
-          if (Array.isArray(res)) {
-            const anulados = res.filter((m) => m.anulado).map((m) => m.nombre.toLowerCase().trim());
-            setModulosAnulados(anulados);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [usuario]);
+  // Los módulos vienen del contexto: se cargan una vez por sesión y se
+  // comparten con el menú de escritorio, en vez de pedirlos por separado.
+  const { tieneAlgunPermiso, modulosPermitidos: modulosMenu } = useAutenticacion();
 
   // Colapsar automáticamente al cambiar de ruta
   useEffect(() => {
     setExpandido(false);
   }, [pathname]);
 
+  const modulosPermitidos = useMemo(
+    () => resolverModulosPermitidos(modulosMenu),
+    [modulosMenu],
+  );
+
   if (!tieneAlgunPermiso()) {
     return null;
   }
-
-  const esModuloAnuladoBD = (nombres: string[]) => {
-    return nombres.some((n) => modulosAnulados.includes(n.toLowerCase().trim()));
-  };
-
-  const esModuloPermitido = (id: string) => {
-    if (id === "inicio") {
-      if (esModuloAnuladoBD(["Registro Visitantes", "Visitantes", "RegistroVisitantes", "Taquilla"])) return false;
-      return (
-        tieneAccesoModulo("Registro Visitantes") ||
-        tieneAccesoModulo("Visitantes") ||
-        tieneAccesoModulo("RegistroVisitantes") ||
-        tieneAccesoModulo("Taquilla") ||
-        tienePermiso("Registro Visitantes", "Ver")
-      );
-    }
-    if (id === "usuarios") {
-      if (esModuloAnuladoBD(["Usuarios"])) return false;
-      return (
-        tieneAccesoModulo("Usuarios") ||
-        tienePermiso("Usuarios", "Ver") ||
-        tieneAccesoModulo("Puestos") ||
-        tieneAccesoModulo("Modulos")
-      );
-    }
-    if (id === "donaciones") {
-      if (esModuloAnuladoBD(["Donaciones"])) return false;
-      return tieneAccesoModulo("Donaciones") || tienePermiso("Donaciones", "Ver");
-    }
-    if (id === "bitacora" || id === "auditoria") {
-      if (esModuloAnuladoBD(["Auditoria", "Auditoría", "Bitacora", "Bitácora"])) return false;
-      return (
-        tieneAccesoModulo("Auditoria") ||
-        tieneAccesoModulo("Auditoría") ||
-        tieneAccesoModulo("Bitacora") ||
-        tieneAccesoModulo("Bitácora") ||
-        tienePermiso("Auditoria", "Ver") ||
-        tienePermiso("Bitacora", "Ver")
-      );
-    }
-    if (id === "cierre-diario") {
-      if (esModuloAnuladoBD(["Cierre Diario", "CierreDiario"])) return false;
-      return (
-        tieneAccesoModulo("Cierre Diario") ||
-        tieneAccesoModulo("CierreDiario") ||
-        tienePermiso("Cierre Diario", "Ver")
-      );
-    }
-    if (id === "reportes") {
-      if (esModuloAnuladoBD(["Reportes"])) return false;
-      return tieneAccesoModulo("Reportes") || tienePermiso("Reportes", "Ver");
-    }
-    if (id === "sincronizacion") {
-      if (esModuloAnuladoBD(["Sincronizacion", "Sincronización"])) return false;
-      return (
-        tieneAccesoModulo("Sincronizacion") ||
-        tieneAccesoModulo("Sincronización") ||
-        tienePermiso("Sincronizacion", "Ver")
-      );
-    }
-    if (id === "actividades") {
-      if (esModuloAnuladoBD(["Actividades"])) return false;
-      return tieneAccesoModulo("Actividades") || tienePermiso("Actividades", "Ver");
-    }
-    return false;
-  };
-
-  const modulosPermitidos = TODOS_LOS_MODULOS.filter((m) => esModuloPermitido(m.id));
 
   // Determinar la lista principal y secundaria de forma inteligente
   const tieneMasDeCuatro = modulosPermitidos.length > 4;
@@ -198,8 +54,9 @@ export function BarraNavegacionInferior() {
     "relative flex flex-col items-center justify-center gap-0.5 rounded-2xl py-2 px-3 " +
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
-  const renderItem = (item: ItemNav) => {
+  const renderItem = (item: ItemModulo) => {
     const activo = estaActivo(item.ruta);
+    const Icono = item.icono;
     return (
       <motion.div
         key={item.id}
@@ -223,7 +80,9 @@ export function BarraNavegacionInferior() {
               transition={SPRING_SUAVE}
             />
           )}
-          <span className="relative z-10">{item.icono}</span>
+          <span className="relative z-10">
+            <Icono className="h-5 w-5" />
+          </span>
           <span className="relative z-10 text-[10px] leading-tight">
             {item.nombre}
           </span>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Image from "next/image";
+import { LogosInstitucionales } from "./logos_institucionales";
 import {
   Heart,
   PlusCircle,
@@ -201,7 +201,7 @@ export function ModuloDonaciones() {
                   Emisión de Recibo de Donación
                 </CardTitle>
                 <CardDescription>
-                  Registre el donativo otorgado al Parque Nacional Actun Kan y emita su recibo de comprobación.
+                  Registre el donativo otorgado al Parque Regional Municipal Actún Kan y emita su recibo de comprobación.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -328,15 +328,9 @@ export function ModuloDonaciones() {
                   <CardContent className="p-0">
                     {/* Header del recibo */}
                     <div className="bg-gradient-to-br from-primary/15 via-primary/5 to-transparent p-5 text-center border-b border-dashed border-border/60">
-                      <Image
-                        src="/actun.png"
-                        alt="Actun Kan"
-                        width={64}
-                        height={64}
-                        className="h-12 w-auto mx-auto mb-2"
-                      />
+                      <LogosInstitucionales tamano="md" className="mb-2" />
                       <h3 className="text-lg font-extrabold tracking-tight text-foreground">
-                        ACTUN KAN
+                        ACTÚN KAN
                       </h3>
                       <p className="text-[11px] font-bold uppercase tracking-widest text-primary">
                         Recibo de Donación
@@ -416,7 +410,7 @@ export function ModuloDonaciones() {
                           />
                         </div>
                         <p className="text-[11px] text-muted-foreground mt-2 font-medium text-center">
-                          ¡Muchas gracias por su apoyo a la conservación del Parque Nacional Actun Kan!
+                          ¡Muchas gracias por su apoyo a la conservación del Parque Regional Municipal Actún Kan!
                         </p>
                       </div>
                     </div>

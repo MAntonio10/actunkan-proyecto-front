@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -24,7 +24,8 @@ import {
   Banknote,
   CreditCard,
   Mountain,
-  Flower2,
+  BookOpen,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,261 +45,197 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { api, ApiError } from "@/lib/api";
 
 import {
-  ORIGENES_VISITANTE,
-  CATEGORIAS_VISITANTE,
-  TIPOS_RECORRIDO,
-  PRECIOS_VISITANTE,
-  PRECIOS_MARIPOSARIO,
-  PRECIO_TICKET_GUIA_SIN_CARNET,
-  GUIAS_DEMO,
-  type OrigenVisitante,
-  type CategoriaVisitante,
-  type TipoRecorrido,
-  type TipoAcceso,
-  type Guia,
-  type MetodoPago,
-  type AtraccionVisitante,
-  type TicketEmitido,
+  type CatalogosTickets,
+  type CatalogoCodificado,
+  type PayloadEmisionTicket,
+  type RespuestaEmisionTicket,
 } from "@/tipos";
 
-// Iconos por origen y categoría
-const ICONO_ORIGEN: Record<OrigenVisitante, typeof Flag> = {
-  nacional: Flag,
-  extranjero: Globe2,
-};
-const ICONO_CATEGORIA: Record<CategoriaVisitante, typeof User> = {
+// Los iconos se eligen por `codigo` (clave estable del catálogo), no por nombre.
+const ICONO_TIPO_VISITANTE: Record<string, typeof User> = {
   adulto: User,
   nino: Baby,
   nino_menor: Baby,
   centro_educativo: GraduationCap,
 };
+// Se indexan por `codigo`, la clave estable del catálogo. 'mariposario' sigue
+// siendo el código en base de datos aunque la atracción se llame ahora
+// Biblioteca Ambiental; el nombre visible viene del backend.
+const ICONO_ATRACCION: Record<string, typeof Mountain> = {
+  cuevas: Mountain,
+  mariposario: BookOpen,
+};
+const COLOR_ATRACCION: Record<string, string> = {
+  cuevas: "text-emerald-500",
+  mariposario: "text-purple-500",
+};
 
-const esquema = z
-  .object({
-    nombre_grupo: z
-      .string()
-      .min(2, "El nombre debe tener al menos 2 caracteres"),
-    origen: z.enum(["nacional", "extranjero"] as const),
-    tipo_recorrido: z.enum(["corto", "largo"] as const),
-    cantidad_adulto: z.number().min(0).max(100),
-    cantidad_nino: z.number().min(0).max(100),
-    cantidad_nino_menor: z.number().min(0).max(100),
-    cantidad_centro_educativo: z.number().min(0).max(100),
-    notas: z.string().optional(),
-  })
-  .refine(
-    (d) =>
-      d.cantidad_adulto + d.cantidad_nino + d.cantidad_nino_menor + d.cantidad_centro_educativo >= 1,
-    {
-      message: "Debe agregar al menos 1 persona",
-      path: ["cantidad_adulto"],
-    },
-  );
+const CODIGO_EXTRANJERO = "extranjero";
+const CODIGO_NINO_MENOR = "nino_menor";
+const CODIGO_CENTRO_EDUCATIVO = "centro_educativo";
+
+const esquema = z.object({
+  nombre_grupo: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
+  notas: z.string().optional(),
+});
 
 type FormValues = z.infer<typeof esquema>;
 
 export interface DatosGuiaPreview {
   asignado: boolean;
   nombre: string;
-  numeroCarnet?: string;
   tieneCarnet: boolean;
   requiereTicketSeparado: boolean;
   precioTicketGuia: number;
-  metodoPago?: MetodoPago;
+  nombreOpcionPago?: string;
 }
 
 export interface DatosTicketPreview {
   nombreVisitante: string;
-  tipoAcceso: TipoAcceso;
+  descripcionAcceso: string;
   cantidadPersonas: number;
   montoTotal: number;
   montoGuiaIndependiente?: number;
   datosGuia?: DatosGuiaPreview;
-  metodoPago: MetodoPago;
-  atraccion: AtraccionVisitante;
+  nombreOpcionPago: string;
+  nombreAtraccion: string;
+  codigoAtraccion: string;
 }
 
 interface Props {
   onDatosChange?: (datos: DatosTicketPreview) => void;
-  onTicketEmitido?: (ticket: TicketEmitido) => void;
+  onTicketEmitido?: (respuesta: RespuestaEmisionTicket) => void;
 }
 
-const CAMPO_CANTIDAD: Record<
-  CategoriaVisitante,
-  "cantidad_adulto" | "cantidad_nino" | "cantidad_nino_menor" | "cantidad_centro_educativo"
-> = {
-  adulto: "cantidad_adulto",
-  nino: "cantidad_nino",
-  nino_menor: "cantidad_nino_menor",
-  centro_educativo: "cantidad_centro_educativo",
-};
-
 export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: Props) {
+  const [catalogos, setCatalogos] = useState<CatalogosTickets | null>(null);
+  const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
-  
-  // Estado para la Atracción seleccionada (Cuevas vs Mariposario)
-  const [atraccion, setAtraccion] = useState<AtraccionVisitante>("cuevas");
 
-  const [cantidades, setCantidades] = useState<
-    Record<CategoriaVisitante, number>
-  >({
-    adulto: 1,
-    nino: 0,
-    nino_menor: 0,
-    centro_educativo: 0,
-  });
+  // Selecciones del formulario, todas por id real del catálogo
+  const [idAtraccion, setIdAtraccion] = useState<number | null>(null);
+  const [idOrigen, setIdOrigen] = useState<number | null>(null);
+  const [idPais, setIdPais] = useState<number | null>(null);
+  const [idTipoRecorrido, setIdTipoRecorrido] = useState<number | null>(null);
+  const [idOpcionPago, setIdOpcionPago] = useState<number | null>(null);
+  const [idOpcionPagoGuia, setIdOpcionPagoGuia] = useState<number | null>(null);
+  const [cantidades, setCantidades] = useState<Record<number, number>>({});
 
-  // Estado para Forma de Pago (Efectivo vs Tarjeta) del visitante
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo");
+  const [paisPopoverAbierto, setPaisPopoverAbierto] = useState(false);
+  const [busquedaPais, setBusquedaPais] = useState("");
 
-  // Estado para Forma de Pago independiente del ticket de Guía (cuando no tiene carnet)
-  const [metodoPagoGuia, setMetodoPagoGuia] = useState<MetodoPago>("efectivo");
-
-  // Estado para Precios Personalizados/Editables por Atracción y por Origen
-  const [preciosEditadosPorAtraccion, setPreciosEditadosPorAtraccion] = useState<
-    Record<AtraccionVisitante, Record<OrigenVisitante, Record<CategoriaVisitante, number>>>
-  >({
-    cuevas: {
-      nacional: { ...PRECIOS_VISITANTE.nacional },
-      extranjero: { ...PRECIOS_VISITANTE.extranjero },
-    },
-    mariposario: {
-      nacional: { ...PRECIOS_MARIPOSARIO.nacional },
-      extranjero: { ...PRECIOS_MARIPOSARIO.extranjero },
-    },
-  });
-
+  // Edición de tarifas: se persiste contra /tarifas, no en estado local
   const [modoEdicionPrecios, setModoEdicionPrecios] = useState(false);
+  const [preciosEditados, setPreciosEditados] = useState<Record<number, string>>({});
+  const [precioGuiaEditado, setPrecioGuiaEditado] = useState<string>("");
+  const [guardandoPrecios, setGuardandoPrecios] = useState(false);
 
-  const [preciosPersonalizadosGuardadosPorAtraccion, setPreciosPersonalizadosGuardadosPorAtraccion] = useState<
-    Record<AtraccionVisitante, Record<OrigenVisitante, boolean>>
-  >({
-    cuevas: { nacional: false, extranjero: false },
-    mariposario: { nacional: false, extranjero: false },
-  });
+  // Guía acompañante
+  const [modoGuia, setModoGuia] = useState<"sin_guia" | "existente" | "nuevo">("sin_guia");
+  const [idGuiaSeleccionado, setIdGuiaSeleccionado] = useState<number | null>(null);
+  const [nombreGuiaInput, setNombreGuiaInput] = useState("");
+  const [tieneCarnetGuia, setTieneCarnetGuia] = useState(true);
+  const [numeroCarnetGuiaInput, setNumeroCarnetGuiaInput] = useState("");
 
-  // Estado para Guía Espiritual/Turístico
-  const [modoGuia, setModoGuia] = useState<"sin_guia" | "existente" | "nuevo">(
-    "sin_guia"
-  );
-  const [guiasDisponibles, setGuiasDisponibles] = useState<Guia[]>(GUIAS_DEMO);
-  const [guiaSeleccionadoId, setGuiaSeleccionadoId] = useState<string>("");
-  const [nombreGuiaInput, setNombreGuiaInput] = useState<string>("");
-  const [tieneCarnetGuia, setTieneCarnetGuia] = useState<boolean>(true);
-  const [numeroCarnetGuiaInput, setNumeroCarnetGuiaInput] = useState<string>("");
-  const [precioTicketGuia, setPrecioTicketGuia] = useState<number>(
-    PRECIO_TICKET_GUIA_SIN_CARNET
-  );
+  const [errorPais, setErrorPais] = useState<string | null>(null);
+  const [errorCantidades, setErrorCantidades] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
-    setValue,
-    watch,
     reset,
+    watch,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(esquema),
-    defaultValues: {
-      nombre_grupo: "",
-      origen: "nacional",
-      tipo_recorrido: "corto",
-      cantidad_adulto: 1,
-      cantidad_nino: 0,
-      cantidad_nino_menor: 0,
-      cantidad_centro_educativo: 0,
-      notas: "",
-    },
+    defaultValues: { nombre_grupo: "", notas: "" },
   });
 
   const nombreGrupo = watch("nombre_grupo");
-  const origen = watch("origen");
-  const tipoRecorrido = watch("tipo_recorrido");
 
-  // Precios actuales para la atracción y origen activos
-  const preciosEditados = preciosEditadosPorAtraccion[atraccion][origen];
-  const preciosPersonalizadosGuardados = preciosPersonalizadosGuardadosPorAtraccion[atraccion][origen];
+  const cargarCatalogos = useCallback(async () => {
+    setCargandoCatalogos(true);
+    try {
+      const res = await api.tickets.getCatalogos();
+      setCatalogos(res);
 
-  // Restablecer tarifas estándar para la atracción y origen activo
-  const restablecerPreciosEstandar = () => {
-    const estandar = atraccion === "cuevas" ? PRECIOS_VISITANTE[origen] : PRECIOS_MARIPOSARIO[origen];
-    setPreciosEditadosPorAtraccion((prev) => ({
-      ...prev,
-      [atraccion]: {
-        ...prev[atraccion],
-        [origen]: { ...estandar },
-      },
-    }));
-    setPrecioTicketGuia(PRECIO_TICKET_GUIA_SIN_CARNET);
-    setPreciosPersonalizadosGuardadosPorAtraccion((prev) => ({
-      ...prev,
-      [atraccion]: {
-        ...prev[atraccion],
-        [origen]: false,
-      },
-    }));
-    setModoEdicionPrecios(false);
-    toast.info(`Tarifas de ${atraccion === "cuevas" ? "Cuevas" : "Mariposario"} (${origen}) restablecidas`);
-  };
+      // Valores iniciales: primera opción de cada catálogo
+      setIdAtraccion((prev) => prev ?? res.atracciones[0]?.id ?? null);
+      setIdOrigen((prev) => prev ?? res.origenes[0]?.id ?? null);
+      setIdTipoRecorrido((prev) => prev ?? res.tiposRecorrido[0]?.id ?? null);
+      const efectivo = res.opcionesPago.find((o) => o.esEfectivo) || res.opcionesPago[0];
+      setIdOpcionPago((prev) => prev ?? efectivo?.id ?? null);
+      setIdOpcionPagoGuia((prev) => prev ?? efectivo?.id ?? null);
+      setCantidades((prev) => {
+        if (Object.keys(prev).length > 0) return prev;
+        const inicial: Record<number, number> = {};
+        res.tiposVisitante.forEach((t) => {
+          inicial[t.id] = t.codigo === "adulto" ? 1 : 0;
+        });
+        return inicial;
+      });
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudieron cargar los catálogos";
+      toast.error("Error al cargar catálogos", { description: mensaje });
+    } finally {
+      setCargandoCatalogos(false);
+    }
+  }, []);
 
-  // Guardar Precios con Validación de Q0.00
-  const handleGuardarPrecios = () => {
-    const categoriasConCosto: CategoriaVisitante[] = ["adulto", "nino", "centro_educativo"];
-    const hayPrecioInvalido = categoriasConCosto.some(
-      (cat) => isNaN(preciosEditados[cat]) || preciosEditados[cat] <= 0
+  useEffect(() => {
+    cargarCatalogos();
+  }, [cargarCatalogos]);
+
+  const atraccionActual = catalogos?.atracciones.find((a) => a.id === idAtraccion);
+  const origenActual = catalogos?.origenes.find((o) => o.id === idOrigen);
+  const tipoRecorridoActual = catalogos?.tiposRecorrido.find((t) => t.id === idTipoRecorrido);
+  const opcionPagoActual = catalogos?.opcionesPago.find((o) => o.id === idOpcionPago);
+  const opcionPagoGuiaActual = catalogos?.opcionesPago.find((o) => o.id === idOpcionPagoGuia);
+  const esExtranjero = origenActual?.codigo === CODIGO_EXTRANJERO;
+
+  // Guatemala se excluye del selector: es el país sede, no aplica a extranjeros
+  const paisesExtranjero = useMemo(
+    () => (catalogos?.paises || []).filter((p) => p.nombre !== "Guatemala"),
+    [catalogos],
+  );
+  const paisSeleccionado = paisesExtranjero.find((p) => p.id === idPais);
+  const paisesFiltrados = useMemo(() => {
+    const q = busquedaPais.trim().toLowerCase();
+    if (!q) return paisesExtranjero;
+    return paisesExtranjero.filter((p) => p.nombre.toLowerCase().includes(q));
+  }, [busquedaPais, paisesExtranjero]);
+
+  // Centro educativo no aplica a visitantes extranjeros
+  const tiposVisitanteVisibles = useMemo(() => {
+    if (!catalogos) return [];
+    return catalogos.tiposVisitante.filter(
+      (t) => !(esExtranjero && t.codigo === CODIGO_CENTRO_EDUCATIVO),
     );
+  }, [catalogos, esExtranjero]);
 
-    if (hayPrecioInvalido) {
-      toast.error("Tarifa no válida", {
-        description: "No se permite guardar precios en Q0.00 o vacíos (excepto niños menores a 7 años).",
-      });
-      return;
-    }
+  // Precio unitario vigente. El servidor vuelve a resolverlo al emitir: esto es
+  // solo para mostrarle el total al usuario antes de confirmar.
+  const precioDe = useCallback(
+    (tipo: CatalogoCodificado): number => {
+      if (tipo.codigo === CODIGO_NINO_MENOR) return 0;
+      const tarifa = catalogos?.tarifas.find(
+        (t) =>
+          t.idAtraccion === idAtraccion &&
+          t.idOrigen === idOrigen &&
+          t.idTipoVisitante === tipo.id,
+      );
+      return tarifa ? parseFloat(tarifa.precio) : 0;
+    },
+    [catalogos, idAtraccion, idOrigen],
+  );
 
-    if (isNaN(precioTicketGuia) || precioTicketGuia <= 0) {
-      toast.error("Tarifa de Guía no válida", {
-        description: "El precio del ticket de guía debe ser mayor a Q0.00.",
-      });
-      return;
-    }
-
-    setPreciosPersonalizadosGuardadosPorAtraccion((prev) => ({
-      ...prev,
-      [atraccion]: {
-        ...prev[atraccion],
-        [origen]: true,
-      },
-    }));
-    setModoEdicionPrecios(false);
-    toast.success(`Precios guardados para ${atraccion === "cuevas" ? "Cuevas" : "Mariposario"} (${origen})`, {
-      description: `Adulto: Q${preciosEditados.adulto.toFixed(2)} · Niño (7+): Q${preciosEditados.nino.toFixed(2)}`,
-    });
-  };
-
-  const handleCambioPrecioUnitario = (cat: CategoriaVisitante, nuevoValor: number) => {
-    setPreciosEditadosPorAtraccion((prev) => ({
-      ...prev,
-      [atraccion]: {
-        ...prev[atraccion],
-        [origen]: {
-          ...prev[atraccion][origen],
-          [cat]: nuevoValor,
-        },
-      },
-    }));
-  };
-
-  const handleSeleccionarGuiaExistente = (id: string) => {
-    setGuiaSeleccionadoId(id);
-    const guiaEncontrado = guiasDisponibles.find((g) => g.id === id);
-    if (guiaEncontrado) {
-      setNombreGuiaInput(guiaEncontrado.nombre);
-      setTieneCarnetGuia(guiaEncontrado.tiene_carnet);
-      setNumeroCarnetGuiaInput(guiaEncontrado.numero_carnet || "");
-    }
-  };
+  const precioTicketGuia = catalogos ? parseFloat(catalogos.precioTicketGuia) : 0;
 
   const datosGuiaCalculados = useMemo<DatosGuiaPreview>(() => {
     if (modoGuia === "sin_guia") {
@@ -310,184 +247,331 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
         precioTicketGuia: 0,
       };
     }
-
-    const nombre = nombreGuiaInput.trim() || "Guía";
-    const numeroCarnet = tieneCarnetGuia ? numeroCarnetGuiaInput.trim() : undefined;
     const requiereTicketSeparado = !tieneCarnetGuia;
-
     return {
       asignado: true,
-      nombre,
-      numeroCarnet,
+      nombre: nombreGuiaInput.trim() || "Guía",
       tieneCarnet: tieneCarnetGuia,
       requiereTicketSeparado,
       precioTicketGuia: requiereTicketSeparado ? precioTicketGuia : 0,
-      metodoPago: requiereTicketSeparado ? metodoPagoGuia : undefined,
+      nombreOpcionPago: requiereTicketSeparado ? opcionPagoGuiaActual?.nombre : undefined,
     };
-  }, [
-    modoGuia,
-    nombreGuiaInput,
-    tieneCarnetGuia,
-    numeroCarnetGuiaInput,
-    precioTicketGuia,
-    metodoPagoGuia,
-  ]);
+  }, [modoGuia, nombreGuiaInput, tieneCarnetGuia, precioTicketGuia, opcionPagoGuiaActual]);
 
   const calculos = useMemo(() => {
-    const totalPersonas =
-      cantidades.adulto + cantidades.nino + cantidades.nino_menor + cantidades.centro_educativo;
-
-    const desgloses = (
-      Object.keys(cantidades) as CategoriaVisitante[]
-    ).map((cat) => {
-      const precioUnitario = cat === "nino_menor" ? 0 : preciosEditados[cat];
-      return {
-        categoria: cat,
-        cantidad: cantidades[cat],
-        precioUnitario,
-        subtotal: cantidades[cat] * precioUnitario,
-      };
+    const desgloses = tiposVisitanteVisibles.map((tipo) => {
+      const cantidad = cantidades[tipo.id] || 0;
+      const precioUnitario = precioDe(tipo);
+      return { tipo, cantidad, precioUnitario, subtotal: cantidad * precioUnitario };
     });
 
+    const totalPersonas = desgloses.reduce((acc, d) => acc + d.cantidad, 0);
     const subtotalVisitantes = desgloses.reduce((acc, d) => acc + d.subtotal, 0);
-    
     const montoGuiaIndependiente = datosGuiaCalculados.requiereTicketSeparado
       ? datosGuiaCalculados.precioTicketGuia
       : 0;
 
-    const montoTotal = subtotalVisitantes + montoGuiaIndependiente;
+    const partes = desgloses
+      .filter((d) => d.cantidad > 0)
+      .map((d) => `${d.cantidad} ${d.tipo.nombre}`);
 
-    const etiquetaOrigen = ORIGENES_VISITANTE.find(
-      (o) => o.valor === origen,
-    )!.etiqueta;
-    const etiquetaAtraccion = atraccion === "cuevas" ? "Cuevas Actun Kan" : "Mariposario";
-    const etiquetaRecorrido =
-      tipoRecorrido === "corto" ? "Recorrido Corto" : "Recorrido Largo";
-
-    const partes: string[] = [];
-    if (cantidades.adulto > 0) {
-      partes.push(
-        `${cantidades.adulto} ${cantidades.adulto === 1 ? "Adulto" : "Adultos"}`,
-      );
-    }
-    if (cantidades.nino > 0) {
-      partes.push(
-        `${cantidades.nino} ${cantidades.nino === 1 ? "Niño" : "Niños"} (7+ años)`,
-      );
-    }
-    if (cantidades.nino_menor > 0) {
-      partes.push(
-        `${cantidades.nino_menor} ${cantidades.nino_menor === 1 ? "Niño" : "Niños"} (<7 años - Gratis)`,
-      );
-    }
-    if (cantidades.centro_educativo > 0) {
-      partes.push(`${cantidades.centro_educativo} Centro Educativo`);
-    }
-    const resumenCategorias =
-      partes.length > 0 ? partes.join(" · ") : "Sin personas";
-
-    const tipoAcceso: TipoAcceso = {
-      id: `${atraccion}-${origen}-${tipoRecorrido}`,
-      nombre: `[${etiquetaAtraccion}] ${resumenCategorias} (${etiquetaOrigen}) · ${etiquetaRecorrido}`,
-      precio: totalPersonas > 0 ? subtotalVisitantes / totalPersonas : 0,
-      descripcion:
-        tipoRecorrido === "corto" ? "Recorrido 45 min" : "Recorrido 2 horas",
-    };
+    const descripcionAcceso = [
+      atraccionActual ? `[${atraccionActual.nombre}]` : "",
+      partes.length > 0 ? partes.join(" · ") : "Sin personas",
+      origenActual ? `(${origenActual.nombre})` : "",
+      tipoRecorridoActual ? `· ${tipoRecorridoActual.nombre}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     return {
-      totalPersonas,
       desgloses,
+      totalPersonas,
       subtotalVisitantes,
       montoGuiaIndependiente,
-      montoTotal,
-      tipoAcceso,
+      montoTotal: subtotalVisitantes + montoGuiaIndependiente,
+      descripcionAcceso,
     };
-  }, [atraccion, origen, tipoRecorrido, cantidades, preciosEditados, datosGuiaCalculados]);
+  }, [
+    tiposVisitanteVisibles,
+    cantidades,
+    precioDe,
+    datosGuiaCalculados,
+    atraccionActual,
+    origenActual,
+    tipoRecorridoActual,
+  ]);
 
   useEffect(() => {
     onDatosChange?.({
       nombreVisitante: nombreGrupo,
-      tipoAcceso: calculos.tipoAcceso,
+      descripcionAcceso: calculos.descripcionAcceso,
       cantidadPersonas: calculos.totalPersonas,
       montoTotal: calculos.montoTotal,
       montoGuiaIndependiente: calculos.montoGuiaIndependiente,
       datosGuia: datosGuiaCalculados,
-      metodoPago,
-      atraccion,
+      nombreOpcionPago: opcionPagoActual?.nombre || "",
+      nombreAtraccion: atraccionActual?.nombre || "",
+      codigoAtraccion: atraccionActual?.codigo || "",
     });
   }, [
     nombreGrupo,
+    calculos.descripcionAcceso,
     calculos.totalPersonas,
     calculos.montoTotal,
     calculos.montoGuiaIndependiente,
-    calculos.tipoAcceso,
     datosGuiaCalculados,
-    metodoPago,
-    atraccion,
+    opcionPagoActual,
+    atraccionActual,
     onDatosChange,
   ]);
 
-  const ajustarCantidad = (cat: CategoriaVisitante, delta: number) => {
-    setCantidades((prev) => {
-      const nueva = Math.max(0, Math.min(100, prev[cat] + delta));
-      setValue(CAMPO_CANTIDAD[cat], nueva, { shouldValidate: true });
-      return { ...prev, [cat]: nueva };
+  const ajustarCantidad = (idTipo: number, delta: number) => {
+    setCantidades((prev) => ({
+      ...prev,
+      [idTipo]: Math.max(0, Math.min(100, (prev[idTipo] || 0) + delta)),
+    }));
+    setErrorCantidades(null);
+  };
+
+  const handleCambiarOrigen = (nuevoIdOrigen: number) => {
+    setIdOrigen(nuevoIdOrigen);
+    const nuevoOrigen = catalogos?.origenes.find((o) => o.id === nuevoIdOrigen);
+    if (nuevoOrigen?.codigo !== CODIGO_EXTRANJERO) {
+      setIdPais(null);
+      setErrorPais(null);
+    } else {
+      // Centro educativo no aplica a extranjeros: se limpia su cantidad
+      const centroEducativo = catalogos?.tiposVisitante.find(
+        (t) => t.codigo === CODIGO_CENTRO_EDUCATIVO,
+      );
+      if (centroEducativo) {
+        setCantidades((prev) => ({ ...prev, [centroEducativo.id]: 0 }));
+      }
+    }
+  };
+
+  const entrarModoEdicionPrecios = () => {
+    const iniciales: Record<number, string> = {};
+    tiposVisitanteVisibles.forEach((t) => {
+      if (t.codigo !== CODIGO_NINO_MENOR) iniciales[t.id] = String(precioDe(t));
     });
+    setPreciosEditados(iniciales);
+    setPrecioGuiaEditado(String(precioTicketGuia));
+    setModoEdicionPrecios(true);
+  };
+
+  const handleGuardarPrecios = async () => {
+    if (!idAtraccion || !idOrigen) return;
+
+    // El backend rechaza precio <= 0 salvo en nino_menor, única categoría gratuita
+    const invalido = Object.values(preciosEditados).some((v) => {
+      const n = parseFloat(v);
+      return isNaN(n) || n <= 0;
+    });
+    if (invalido) {
+      toast.error("Tarifa no válida", {
+        description: "No se permite guardar precios en Q0.00 o vacíos.",
+      });
+      return;
+    }
+    const precioGuiaNum = parseFloat(precioGuiaEditado);
+    if (isNaN(precioGuiaNum) || precioGuiaNum <= 0) {
+      toast.error("Tarifa de Guía no válida", {
+        description: "El precio del ticket de guía debe ser mayor a Q0.00.",
+      });
+      return;
+    }
+
+    setGuardandoPrecios(true);
+    try {
+      // Cada PATCH cierra la vigencia anterior y crea una nueva tarifa
+      const cambios = Object.entries(preciosEditados)
+        .filter(([idTipo, valor]) => {
+          const tipo = tiposVisitanteVisibles.find((t) => t.id === Number(idTipo));
+          return tipo && parseFloat(valor) !== precioDe(tipo);
+        })
+        .map(([idTipo, valor]) =>
+          api.tarifas.actualizarTarifa({
+            idAtraccion,
+            idOrigen,
+            idTipoVisitante: Number(idTipo),
+            precio: parseFloat(valor),
+          }),
+        );
+
+      if (precioGuiaNum !== precioTicketGuia) {
+        cambios.push(api.tarifas.actualizarTarifaGuia(precioGuiaNum) as Promise<never>);
+      }
+
+      if (cambios.length === 0) {
+        setModoEdicionPrecios(false);
+        toast.info("No hubo cambios de tarifa");
+        return;
+      }
+
+      await Promise.all(cambios);
+      await cargarCatalogos();
+      setModoEdicionPrecios(false);
+      toast.success("Tarifas actualizadas", {
+        description: "Los tickets ya emitidos conservan su precio original.",
+      });
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudieron guardar las tarifas";
+      toast.error("Error al guardar tarifas", { description: mensaje });
+    } finally {
+      setGuardandoPrecios(false);
+    }
+  };
+
+  const handleSeleccionarGuiaExistente = (valor: string) => {
+    const id = Number(valor);
+    setIdGuiaSeleccionado(id);
+    const guia = catalogos?.guias.find((g) => g.id === id);
+    if (guia) {
+      setNombreGuiaInput(guia.nombre);
+      setTieneCarnetGuia(guia.tieneCarnet);
+    }
   };
 
   const onSubmit = async (datos: FormValues) => {
-    setEnviando(true);
-    await new Promise((r) => setTimeout(r, 600));
-
-    if (modoGuia === "nuevo" && nombreGuiaInput.trim()) {
-      const nuevoGuia: Guia = {
-        id: `g-${Date.now()}`,
-        nombre: nombreGuiaInput.trim(),
-        numero_carnet: tieneCarnetGuia ? numeroCarnetGuiaInput.trim() : undefined,
-        tiene_carnet: tieneCarnetGuia,
-      };
-      setGuiasDisponibles((prev) => [...prev, nuevoGuia]);
+    if (!idAtraccion || !idOrigen || !idTipoRecorrido || !idOpcionPago) {
+      toast.error("Faltan datos del catálogo", {
+        description: "Recargue la página para volver a cargar los catálogos.",
+      });
+      return;
     }
 
-    const ticketEmitido: TicketEmitido = {
-      id: `t-${Date.now()}`,
-      numero_ticket: `TCK-2026-${Math.floor(100 + Math.random() * 900)}`,
-      nombre_visitante: datos.nombre_grupo,
-      atraccion,
-      origen,
-      tipo_recorrido: tipoRecorrido,
-      cantidad_personas: calculos.totalPersonas,
-      monto_total: calculos.subtotalVisitantes,
-      metodo_pago: metodoPago,
-      nombre_guia: datosGuiaCalculados.asignado ? datosGuiaCalculados.nombre : undefined,
-      tiene_carnet_guia: datosGuiaCalculados.asignado ? datosGuiaCalculados.tieneCarnet : undefined,
-      monto_guia: datosGuiaCalculados.requiereTicketSeparado ? datosGuiaCalculados.precioTicketGuia : undefined,
-      metodo_pago_guia: datosGuiaCalculados.requiereTicketSeparado ? metodoPagoGuia : undefined,
-      fecha: new Date(),
+    if (calculos.totalPersonas < 1) {
+      setErrorCantidades("Debe agregar al menos 1 persona");
+      return;
+    }
+    if (esExtranjero && !idPais) {
+      setErrorPais("Seleccione el país de origen del visitante extranjero");
+      return;
+    }
+    if (modoGuia === "existente" && !idGuiaSeleccionado) {
+      toast.error("Seleccione un guía de la lista");
+      return;
+    }
+    if (modoGuia === "nuevo" && !nombreGuiaInput.trim()) {
+      toast.error("Ingrese el nombre del guía");
+      return;
+    }
+    if (modoGuia === "nuevo" && tieneCarnetGuia && !numeroCarnetGuiaInput.trim()) {
+      toast.error("Ingrese el número de carnet del guía");
+      return;
+    }
+
+    const guia: PayloadEmisionTicket["guia"] =
+      modoGuia === "sin_guia"
+        ? undefined
+        : modoGuia === "existente"
+          ? {
+              modo: "existente",
+              idGuia: idGuiaSeleccionado!,
+              ...(tieneCarnetGuia ? {} : { idOpcionPagoGuia: idOpcionPagoGuia ?? undefined }),
+            }
+          : {
+              modo: "nuevo",
+              nombre: nombreGuiaInput.trim(),
+              tieneCarnet: tieneCarnetGuia,
+              ...(tieneCarnetGuia
+                ? { numeroCarnet: numeroCarnetGuiaInput.trim() }
+                : { idOpcionPagoGuia: idOpcionPagoGuia ?? undefined }),
+            };
+
+    const payload: PayloadEmisionTicket = {
+      nombreGrupo: datos.nombre_grupo,
+      idAtraccion,
+      idOrigen,
+      idPais: esExtranjero ? idPais : null,
+      idTipoRecorrido,
+      cantidades: Object.entries(cantidades)
+        .filter(([, cantidad]) => cantidad > 0)
+        .map(([idTipoVisitante, cantidad]) => ({
+          idTipoVisitante: Number(idTipoVisitante),
+          cantidad,
+        })),
+      idOpcionPago,
+      notas: datos.notas || undefined,
+      guia,
     };
 
-    onTicketEmitido?.(ticketEmitido);
+    setEnviando(true);
+    try {
+      const respuesta = await api.tickets.emitir(payload);
+      onTicketEmitido?.(respuesta);
 
-    if (datosGuiaCalculados.asignado && datosGuiaCalculados.requiereTicketSeparado) {
-      toast.success("Se emitieron 2 tickets exitosamente", {
-        description: `1x Ticket ${atraccion === "cuevas" ? "Cuevas" : "Mariposario"} (${metodoPago}) + 1x Ticket Guía (${metodoPagoGuia}) · Total Q${calculos.montoTotal.toFixed(2)}`,
+      const cantidadTickets = respuesta.tickets.length;
+      toast.success(
+        cantidadTickets > 1
+          ? `Se emitieron ${cantidadTickets} tickets exitosamente`
+          : "Ticket emitido exitosamente",
+        {
+          description: `${datos.nombre_grupo} · ${atraccionActual?.nombre} · Total Q${parseFloat(
+            respuesta.montoTotalGeneral,
+          ).toFixed(2)}`,
+        },
+      );
+
+      reset();
+      setCantidades((prev) => {
+        const limpio: Record<number, number> = {};
+        Object.keys(prev).forEach((k) => {
+          const tipo = catalogos?.tiposVisitante.find((t) => t.id === Number(k));
+          limpio[Number(k)] = tipo?.codigo === "adulto" ? 1 : 0;
+        });
+        return limpio;
       });
-    } else {
-      toast.success("Ticket emitido exitosamente", {
-        description: `${datos.nombre_grupo} · ${atraccion === "cuevas" ? "Cuevas" : "Mariposario"} · ${calculos.totalPersonas} personas · Q${calculos.montoTotal.toFixed(2)} (${metodoPago})`,
+      setIdPais(null);
+      setModoGuia("sin_guia");
+      setIdGuiaSeleccionado(null);
+      setNombreGuiaInput("");
+      setNumeroCarnetGuiaInput("");
+      setTieneCarnetGuia(true);
+      setErrorPais(null);
+      setErrorCantidades(null);
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudo emitir el ticket";
+      // El backend exige una caja abierta para vender y responde 400 si no la hay
+      const esFaltaDeCaja = err instanceof ApiError && err.status === 400 && /caja/i.test(mensaje);
+      toast.error(esFaltaDeCaja ? "No hay caja abierta" : "Error al emitir el ticket", {
+        description: esFaltaDeCaja
+          ? "Debe abrir la caja en el módulo Cierre Diario antes de emitir tickets."
+          : mensaje,
       });
+    } finally {
+      setEnviando(false);
     }
-
-    reset();
-    setCantidades({ adulto: 1, nino: 0, nino_menor: 0, centro_educativo: 0 });
-    setMetodoPago("efectivo");
-    setMetodoPagoGuia("efectivo");
-    setModoGuia("sin_guia");
-    setNombreGuiaInput("");
-    setNumeroCarnetGuiaInput("");
-    setTieneCarnetGuia(true);
-    setEnviando(false);
   };
+
+  if (cargandoCatalogos) {
+    return (
+      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <CardContent className="flex flex-col items-center justify-center py-16 gap-3">
+          <Spinner className="h-8 w-8 text-primary" />
+          <p className="text-sm text-muted-foreground">Cargando catálogos...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!catalogos) {
+    return (
+      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <CardContent className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <p className="text-sm text-muted-foreground">
+            No se pudieron cargar los catálogos de emisión.
+          </p>
+          <Button variant="outline" onClick={cargarCatalogos} className="cursor-pointer">
+            Reintentar
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
@@ -495,19 +579,13 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
         <div className="flex items-center gap-2">
           <Ticket className="h-5 w-5 text-primary shrink-0" />
           <div>
-            <CardTitle className="text-lg">
-              Registro y Emisión de Ticket
-            </CardTitle>
-            {modoEdicionPrecios ? (
+            <CardTitle className="text-lg">Registro y Emisión de Ticket</CardTitle>
+            {modoEdicionPrecios && (
               <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Edición de Precios ({atraccion === "cuevas" ? "Cuevas" : "Mariposario"} · {origen === "nacional" ? "Nacionales" : "Extranjeros"})
+                Edición de Tarifas ({atraccionActual?.nombre} · {origenActual?.nombre})
               </span>
-            ) : preciosPersonalizadosGuardados ? (
-              <span className="text-[11px] font-semibold text-primary flex items-center gap-1">
-                Tarifas Personalizadas ({atraccion === "cuevas" ? "Cuevas" : "Mariposario"})
-              </span>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -517,81 +595,80 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setModoEdicionPrecios(true)}
+              onClick={entrarModoEdicionPrecios}
               className="text-xs h-9 border-primary/40 text-primary hover:bg-primary/10 font-semibold cursor-pointer"
             >
               <Edit3 className="mr-1.5 h-4 w-4" />
               Editar Precios
             </Button>
           ) : (
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              onClick={handleGuardarPrecios}
-              className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm cursor-pointer"
-            >
-              <Check className="mr-1.5 h-4 w-4" />
-              Guardar Precios
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={handleGuardarPrecios}
+                disabled={guardandoPrecios}
+                className="text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm cursor-pointer"
+              >
+                {guardandoPrecios ? (
+                  <Spinner className="mr-1.5 h-4 w-4" />
+                ) : (
+                  <Check className="mr-1.5 h-4 w-4" />
+                )}
+                Guardar Precios
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setModoEdicionPrecios(false)}
+                className="text-xs h-9 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Cancelar
+              </Button>
+            </>
           )}
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={restablecerPreciosEstandar}
-            className="text-xs h-9 text-muted-foreground hover:text-foreground cursor-pointer"
-            title="Restablecer tarifas estándar"
-          >
-            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-            Restablecer
-          </Button>
         </div>
       </CardHeader>
 
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* Selector de Atracción: Cuevas vs Mariposario */}
+          {/* Atracción / Destino */}
           <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold">
               <Compass className="h-4 w-4 text-primary" />
               Atracción / Destino
             </Label>
             <div className="grid grid-cols-2 gap-2.5">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAtraccion("cuevas")}
-                className={`h-auto min-h-[3.5rem] py-2.5 px-2.5 sm:px-3.5 justify-start gap-2 sm:gap-2.5 border-2 cursor-pointer transition-colors w-full overflow-hidden ${
-                  atraccion === "cuevas"
-                    ? "border-primary bg-primary/10 text-primary font-bold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                <Mountain className="h-5 w-5 text-emerald-500 shrink-0" />
-                <div className="flex flex-col items-start leading-tight text-left min-w-0 flex-1 overflow-hidden">
-                  <span className="text-xs sm:text-sm font-bold text-foreground truncate w-full">Cuevas Actun Kan</span>
-                  <span className="text-[10px] sm:text-[11px] text-muted-foreground font-normal truncate w-full">Cavernas naturales</span>
-                </div>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAtraccion("mariposario")}
-                className={`h-auto min-h-[3.5rem] py-2.5 px-2.5 sm:px-3.5 justify-start gap-2 sm:gap-2.5 border-2 cursor-pointer transition-colors w-full overflow-hidden ${
-                  atraccion === "mariposario"
-                    ? "border-primary bg-primary/10 text-primary font-bold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                <Flower2 className="h-5 w-5 text-purple-500 shrink-0" />
-                <div className="flex flex-col items-start leading-tight text-left min-w-0 flex-1 overflow-hidden">
-                  <span className="text-xs sm:text-sm font-bold text-foreground truncate w-full">Mariposario</span>
-                  <span className="text-[10px] sm:text-[11px] text-muted-foreground font-normal truncate w-full">Santuario tropical</span>
-                </div>
-              </Button>
+              {catalogos.atracciones.map((a) => {
+                const Icono = ICONO_ATRACCION[a.codigo] || Compass;
+                const activo = idAtraccion === a.id;
+                return (
+                  <Button
+                    key={a.id}
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIdAtraccion(a.id)}
+                    className={cn(
+                      "h-auto min-h-[3.5rem] py-2.5 px-2.5 sm:px-3.5 justify-start gap-2 sm:gap-2.5 border-2 cursor-pointer transition-colors w-full overflow-hidden",
+                      activo
+                        ? "border-primary bg-primary/10 font-bold shadow-sm hover:bg-primary/10 hover:border-primary"
+                        : "border-border/60 bg-background hover:border-primary/80 hover:bg-background",
+                    )}
+                  >
+                    <Icono
+                      className={cn("h-5 w-5 shrink-0", COLOR_ATRACCION[a.codigo] || "text-primary")}
+                    />
+                    <div className="flex flex-col items-start leading-tight text-left min-w-0 flex-1 overflow-hidden">
+                      <span className="text-xs sm:text-sm font-bold text-foreground truncate w-full">
+                        {a.nombre}
+                      </span>
+                    </div>
+                  </Button>
+                );
+              })}
             </div>
           </div>
 
@@ -610,51 +687,39 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
               {...register("nombre_grupo")}
             />
             {errors.nombre_grupo && (
-              <p className="text-sm text-destructive">
-                {errors.nombre_grupo.message}
-              </p>
+              <p className="text-sm text-destructive">{errors.nombre_grupo.message}</p>
             )}
           </div>
 
           {/* Origen */}
           <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Origen
-            </Label>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Origen</Label>
             <RadioGroup
-              value={origen}
-              onValueChange={(v) => {
-                const nuevoOrigen = v as OrigenVisitante;
-                setValue("origen", nuevoOrigen);
-                if (nuevoOrigen === "extranjero") {
-                  setCantidades((prev) => ({ ...prev, centro_educativo: 0 }));
-                  setValue("cantidad_centro_educativo", 0);
-                }
-              }}
+              value={idOrigen ? String(idOrigen) : ""}
+              onValueChange={(v) => handleCambiarOrigen(Number(v))}
               className="grid grid-cols-2 gap-2"
             >
-              {ORIGENES_VISITANTE.map((o) => {
-                const Icono = ICONO_ORIGEN[o.valor];
-                const activo = origen === o.valor;
+              {catalogos.origenes.map((o) => {
+                const Icono = o.codigo === CODIGO_EXTRANJERO ? Globe2 : Flag;
+                const activo = idOrigen === o.id;
                 return (
-                  <div key={o.valor} className="relative">
+                  <div key={o.id} className="relative">
                     <RadioGroupItem
-                      value={o.valor}
-                      id={`origen-${o.valor}`}
+                      value={String(o.id)}
+                      id={`origen-${o.id}`}
                       className="peer sr-only"
                     />
                     <Label
-                      htmlFor={`origen-${o.valor}`}
-                      className={`flex items-center justify-center gap-2 h-11 rounded-md border-2 cursor-pointer transition-colors ${
+                      htmlFor={`origen-${o.id}`}
+                      className={cn(
+                        "flex items-center justify-center gap-2 h-11 rounded-md border-2 cursor-pointer transition-colors",
                         activo
                           ? "border-primary bg-primary/10 text-primary font-semibold hover:bg-primary/10 hover:border-primary"
-                          : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                      }`}
+                          : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground",
+                      )}
                     >
                       <Icono className="h-4 w-4" />
-                      <span className="font-medium text-sm">
-                        {o.etiqueta}
-                      </span>
+                      <span className="font-medium text-sm">{o.nombre}</span>
                     </Label>
                   </div>
                 );
@@ -662,92 +727,123 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
             </RadioGroup>
           </div>
 
-          {/* Forma de Pago (Efectivo vs Tarjeta) */}
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold">
-              <Banknote className="h-4 w-4 text-primary" />
-              Forma de Pago (Ticket Visitante)
-            </Label>
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMetodoPago("efectivo")}
-                className={`h-11 justify-center gap-2 border-2 cursor-pointer transition-colors ${
-                  metodoPago === "efectivo"
-                    ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
+          {/* País de origen (solo visitantes extranjeros) */}
+          {esExtranjero && (
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold">
+                <Globe2 className="h-4 w-4 text-primary" />
+                País de Origen
+              </Label>
+              <Popover
+                open={paisPopoverAbierto}
+                onOpenChange={(open) => {
+                  setPaisPopoverAbierto(open);
+                  if (!open) setBusquedaPais("");
+                }}
               >
-                <Banknote className="h-4 w-4 text-emerald-500" />
-                <span>Efectivo</span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMetodoPago("tarjeta")}
-                className={`h-11 justify-center gap-2 border-2 cursor-pointer transition-colors ${
-                  metodoPago === "tarjeta"
-                    ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                <CreditCard className="h-4 w-4 text-blue-500" />
-                <span>Tarjeta</span>
-              </Button>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={paisPopoverAbierto}
+                    className={cn(
+                      "w-full h-11 justify-between bg-muted/50 border-border/50 font-normal",
+                      !paisSeleccionado && "text-muted-foreground",
+                    )}
+                  >
+                    {paisSeleccionado?.nombre || "Seleccione el país..."}
+                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <div className="p-2 border-b border-border/50">
+                    <Input
+                      placeholder="Buscar país..."
+                      value={busquedaPais}
+                      onChange={(e) => setBusquedaPais(e.target.value)}
+                      className="h-9"
+                      autoFocus
+                    />
+                  </div>
+                  <ScrollArea className="h-60">
+                    <div className="p-1">
+                      {paisesFiltrados.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          No se encontraron países.
+                        </p>
+                      ) : (
+                        paisesFiltrados.map((p) => {
+                          const seleccionado = p.id === idPais;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setIdPais(p.id);
+                                setErrorPais(null);
+                                setPaisPopoverAbierto(false);
+                                setBusquedaPais("");
+                              }}
+                              className={cn(
+                                "w-full flex items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm text-left cursor-pointer hover:bg-muted transition-colors",
+                                seleccionado && "bg-primary/10 text-primary font-semibold",
+                              )}
+                            >
+                              <span>{p.nombre}</span>
+                              {seleccionado && <Check className="h-4 w-4 shrink-0" />}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
+              {errorPais && <p className="text-sm text-destructive">{errorPais}</p>}
             </div>
-          </div>
+          )}
 
-          {/* Cantidad por categoría con Precios Editables Independientes */}
+          {/* Visitantes por categoría */}
           <div className="space-y-2">
             <div className="flex items-baseline justify-between">
               <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <span>Visitantes por Categoría ({atraccion === "cuevas" ? "Cuevas" : "Mariposario"} · {origen === "nacional" ? "Nacionales" : "Extranjeros"})</span>
-                {modoEdicionPrecios && (
-                  <span className="hidden sm:inline-block text-[10px] bg-emerald-500/15 text-emerald-500 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                    Modo Edición Habilitado
-                  </span>
-                )}
+                <span>
+                  Visitantes por Categoría ({atraccionActual?.nombre} · {origenActual?.nombre})
+                </span>
               </Label>
               <span className="text-xs text-muted-foreground">
-                Total Registrados: <span className="font-semibold text-foreground">{calculos.totalPersonas}</span>
+                Total Registrados:{" "}
+                <span className="font-semibold text-foreground">{calculos.totalPersonas}</span>
               </span>
             </div>
+
             <div className="space-y-2.5">
-              {CATEGORIAS_VISITANTE.filter(
-                (cat) =>
-                  !(origen === "extranjero" && cat.valor === "centro_educativo"),
-              ).map((cat) => {
-                const Icono = ICONO_CATEGORIA[cat.valor];
-                const cantidadCat = cantidades[cat.valor];
-                const activo = cantidadCat > 0;
-                const esGratuito = cat.valor === "nino_menor";
-                const precio = esGratuito ? 0 : preciosEditados[cat.valor];
-                const subtotal = cantidadCat * precio;
+              {calculos.desgloses.map(({ tipo, cantidad, precioUnitario, subtotal }) => {
+                const Icono = ICONO_TIPO_VISITANTE[tipo.codigo] || User;
+                const activo = cantidad > 0;
+                const esGratuito = tipo.codigo === CODIGO_NINO_MENOR;
 
                 return (
                   <div
-                    key={cat.valor}
-                    className={`flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border-2 p-3 transition-all ${
-                      activo
-                        ? "border-primary/60 bg-primary/5"
-                        : "border-border/50 bg-muted/20"
-                    }`}
+                    key={tipo.id}
+                    className={cn(
+                      "flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border-2 p-3 transition-all",
+                      activo ? "border-primary/60 bg-primary/5" : "border-border/50 bg-muted/20",
+                    )}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div
-                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
-                          activo
-                            ? "bg-primary/15 text-primary"
-                            : "bg-muted text-muted-foreground"
-                        }`}
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+                          activo ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+                        )}
                       >
                         <Icono className="h-4 w-4" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium leading-tight text-sm sm:text-base flex items-center gap-1.5">
-                          <span>{cat.etiqueta}</span>
+                          <span>{tipo.nombre}</span>
                           {esGratuito && (
                             <span className="text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.2 rounded-full border border-emerald-500/30">
                               Gratis
@@ -757,14 +853,14 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                         <p className="text-xs text-muted-foreground">
                           {esGratuito ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              Ingreso sin costo (Menor de 7 años)
+                              Ingreso sin costo
                             </span>
-                          ) : cantidadCat > 0 ? (
+                          ) : cantidad > 0 ? (
                             <span className="text-foreground font-medium">
                               Subtotal Q{subtotal.toFixed(2)}
                             </span>
                           ) : (
-                            <span>Tarifa: Q{precio.toFixed(2)} c/u</span>
+                            <span>Tarifa: Q{precioUnitario.toFixed(2)} c/u</span>
                           )}
                         </p>
                       </div>
@@ -784,24 +880,27 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                               min={1}
                               step={1}
                               placeholder="0"
-                              value={precio === 0 ? "" : precio}
-                              onChange={(e) => {
-                                const valClean = e.target.value.replace(/^0+(?=\d)/, "");
-                                const parsed = valClean === "" ? 0 : parseFloat(valClean);
-                                handleCambioPrecioUnitario(cat.valor, isNaN(parsed) ? 0 : parsed);
-                              }}
+                              value={preciosEditados[tipo.id] ?? ""}
+                              onChange={(e) =>
+                                setPreciosEditados((prev) => ({
+                                  ...prev,
+                                  [tipo.id]: e.target.value,
+                                }))
+                              }
                               className="w-16 h-7 p-0 border-none bg-transparent text-sm font-bold text-center focus-visible:ring-0 focus-visible:ring-offset-0"
-                              title={`Editar precio unitario para ${atraccion} (${origen})`}
                             />
                           </div>
                         )
                       ) : (
-                        <div className={`text-xs font-semibold px-2.5 py-1.5 rounded-md border ${
-                          esGratuito
-                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-bold"
-                            : "bg-muted text-muted-foreground border-border/40"
-                        }`}>
-                          {esGratuito ? "Q0.00 (Gratis)" : `Q${precio.toFixed(2)} c/u`}
+                        <div
+                          className={cn(
+                            "text-xs font-semibold px-2.5 py-1.5 rounded-md border",
+                            esGratuito
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-bold"
+                              : "bg-muted text-muted-foreground border-border/40",
+                          )}
+                        >
+                          {esGratuito ? "Q0.00 (Gratis)" : `Q${precioUnitario.toFixed(2)} c/u`}
                         </div>
                       )}
 
@@ -811,25 +910,23 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-primary hover:bg-primary/10 cursor-pointer"
-                          onClick={() => ajustarCantidad(cat.valor, -1)}
-                          disabled={cantidadCat <= 0}
-                          aria-label={`Quitar un ${cat.etiqueta.toLowerCase()}`}
+                          onClick={() => ajustarCantidad(tipo.id, -1)}
+                          disabled={cantidad <= 0}
+                          aria-label={`Quitar un ${tipo.nombre}`}
                         >
                           <Minus className="h-4 w-4" />
                         </Button>
                         <div className="w-8 text-center">
-                          <span className="text-base font-bold tabular-nums">
-                            {cantidadCat}
-                          </span>
+                          <span className="text-base font-bold tabular-nums">{cantidad}</span>
                         </div>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-primary hover:bg-primary/10 cursor-pointer"
-                          onClick={() => ajustarCantidad(cat.valor, 1)}
-                          disabled={cantidadCat >= 100}
-                          aria-label={`Agregar un ${cat.etiqueta.toLowerCase()}`}
+                          onClick={() => ajustarCantidad(tipo.id, 1)}
+                          disabled={cantidad >= 100}
+                          aria-label={`Agregar un ${tipo.nombre}`}
                         >
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -839,11 +936,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                 );
               })}
             </div>
-            {errors.cantidad_adulto && (
-              <p className="text-sm text-destructive">
-                {errors.cantidad_adulto.message}
-              </p>
-            )}
+            {errorCantidades && <p className="text-sm text-destructive">{errorCantidades}</p>}
           </div>
 
           {/* Tipo de recorrido */}
@@ -852,38 +945,67 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
               Tipo de Recorrido
             </Label>
             <RadioGroup
-              value={tipoRecorrido}
-              onValueChange={(v) =>
-                setValue("tipo_recorrido", v as TipoRecorrido)
-              }
+              value={idTipoRecorrido ? String(idTipoRecorrido) : ""}
+              onValueChange={(v) => setIdTipoRecorrido(Number(v))}
               className="grid grid-cols-1 sm:grid-cols-2 gap-3"
             >
-              {TIPOS_RECORRIDO.map((tipo) => (
-                <div key={tipo.valor} className="relative">
+              {catalogos.tiposRecorrido.map((t) => (
+                <div key={t.id} className="relative">
                   <RadioGroupItem
-                    value={tipo.valor}
-                    id={tipo.valor}
+                    value={String(t.id)}
+                    id={`recorrido-${t.id}`}
                     className="peer sr-only"
                   />
                   <Label
-                    htmlFor={tipo.valor}
-                    className={`flex flex-col gap-1 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                      tipoRecorrido === tipo.valor
+                    htmlFor={`recorrido-${t.id}`}
+                    className={cn(
+                      "flex flex-col gap-1 p-3 rounded-lg border-2 cursor-pointer transition-colors",
+                      idTipoRecorrido === t.id
                         ? "border-primary bg-primary/10 text-primary font-semibold hover:bg-primary/10 hover:border-primary"
-                        : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                    }`}
+                        : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground",
+                    )}
                   >
-                    <span className="font-medium">{tipo.etiqueta}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {tipo.descripcion}
-                    </span>
+                    <span className="font-medium">{t.nombre}</span>
                   </Label>
                 </div>
               ))}
             </RadioGroup>
           </div>
 
-          {/* Sección de Asignación / Registro de Guía */}
+          {/* Forma de Pago */}
+          <div className="space-y-2">
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold">
+              <Banknote className="h-4 w-4 text-primary" />
+              Forma de Pago (Ticket Visitante)
+            </Label>
+            <div className="grid grid-cols-2 gap-3">
+              {catalogos.opcionesPago.map((o) => {
+                const Icono = o.esEfectivo ? Banknote : CreditCard;
+                const activo = idOpcionPago === o.id;
+                return (
+                  <Button
+                    key={o.id}
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIdOpcionPago(o.id)}
+                    className={cn(
+                      "h-11 justify-center gap-2 border-2 cursor-pointer transition-colors",
+                      activo
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
+                        : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground",
+                    )}
+                  >
+                    <Icono
+                      className={cn("h-4 w-4", o.esEfectivo ? "text-emerald-500" : "text-blue-500")}
+                    />
+                    <span>{o.nombre}</span>
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Guía acompañante */}
           <div className="space-y-3 rounded-xl border-2 border-primary/20 bg-primary/5 p-4">
             <div className="flex items-center justify-between">
               <Label className="text-xs uppercase tracking-wider font-semibold text-primary flex items-center gap-1.5">
@@ -898,155 +1020,60 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
             </div>
 
             <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setModoGuia("sin_guia");
-                  setNombreGuiaInput("");
-                  setNumeroCarnetGuiaInput("");
-                }}
-                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
-                  modoGuia === "sin_guia"
-                    ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                Sin Guía
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setModoGuia("existente");
-                  if (guiasDisponibles.length > 0) {
-                    handleSeleccionarGuiaExistente(guiasDisponibles[0].id);
-                  }
-                }}
-                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
-                  modoGuia === "existente"
-                    ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                Seleccionar Guía
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setModoGuia("nuevo");
-                  setGuiaSeleccionadoId("");
-                  setNombreGuiaInput("");
-                  setNumeroCarnetGuiaInput("");
-                  setTieneCarnetGuia(true);
-                }}
-                className={`text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors ${
-                  modoGuia === "nuevo"
-                    ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                    : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                }`}
-              >
-                + Crear Guía
-              </Button>
+              {(
+                [
+                  { modo: "sin_guia" as const, etiqueta: "Sin Guía" },
+                  { modo: "existente" as const, etiqueta: "Seleccionar Guía" },
+                  { modo: "nuevo" as const, etiqueta: "+ Crear Guía" },
+                ]
+              ).map(({ modo, etiqueta }) => (
+                <Button
+                  key={modo}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setModoGuia(modo);
+                    setNombreGuiaInput("");
+                    setNumeroCarnetGuiaInput("");
+                    setIdGuiaSeleccionado(null);
+                    setTieneCarnetGuia(true);
+                    if (modo === "existente" && catalogos.guias.length > 0) {
+                      handleSeleccionarGuiaExistente(String(catalogos.guias[0].id));
+                    }
+                  }}
+                  className={cn(
+                    "text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors",
+                    modoGuia === modo
+                      ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
+                      : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground",
+                  )}
+                >
+                  {etiqueta}
+                </Button>
+              ))}
             </div>
 
             {modoGuia === "existente" && (
               <div className="space-y-3 pt-2">
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">
-                    Seleccionar Guía Registrado
-                  </Label>
+                  <Label className="text-xs text-muted-foreground">Seleccionar Guía Registrado</Label>
                   <Select
-                    value={guiaSeleccionadoId}
+                    value={idGuiaSeleccionado ? String(idGuiaSeleccionado) : ""}
                     onValueChange={handleSeleccionarGuiaExistente}
                   >
                     <SelectTrigger className="bg-background border-border/60 h-10">
                       <SelectValue placeholder="Seleccione un guía..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {guiasDisponibles.map((g) => (
-                        <SelectItem key={g.id} value={g.id}>
-                          {g.nombre} {g.tiene_carnet ? "(Acreditado)" : "(Sin Carnet)"}
+                      {catalogos.guias.map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.nombre} {g.tieneCarnet ? "(Acreditado)" : "(Sin Carnet)"}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-
-                {!tieneCarnetGuia && (
-                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 space-y-3 text-xs text-amber-600 dark:text-amber-400">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold">Guía No Acreditado (Sin Carnet)</p>
-                        <p className="text-muted-foreground mt-0.5">
-                          Este guía no cuenta con carnet registrado. Se generará un <strong>ticket independiente por separado</strong> para el guía.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-amber-500/20">
-                      <span className="font-semibold text-foreground">Forma de pago ticket de guía:</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setMetodoPagoGuia("efectivo")}
-                          className={`h-8 px-2.5 text-xs border cursor-pointer transition-colors ${
-                            metodoPagoGuia === "efectivo"
-                              ? "border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-200 font-bold hover:bg-amber-500/20"
-                              : "border-border/60 bg-background text-muted-foreground hover:border-amber-500/60 hover:bg-background"
-                          }`}
-                        >
-                          <Banknote className="h-3.5 w-3.5 text-emerald-500" />
-                          <span>Efectivo</span>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setMetodoPagoGuia("tarjeta")}
-                          className={`h-8 px-2.5 text-xs border cursor-pointer transition-colors ${
-                            metodoPagoGuia === "tarjeta"
-                              ? "border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-200 font-bold hover:bg-amber-500/20"
-                              : "border-border/60 bg-background text-muted-foreground hover:border-amber-500/60 hover:bg-background"
-                          }`}
-                        >
-                          <CreditCard className="h-3.5 w-3.5 text-blue-500" />
-                          <span>Tarjeta</span>
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 border-t border-amber-500/20">
-                      <span>Precio ticket de guía (Sin Carnet):</span>
-                      {modoEdicionPrecios ? (
-                        <div className="flex items-center gap-1 bg-background rounded px-2 py-0.5 border-2 border-emerald-500/60">
-                          <span className="font-semibold text-emerald-500">Q</span>
-                          <Input
-                            type="number"
-                            min={1}
-                            placeholder="0"
-                            value={precioTicketGuia === 0 ? "" : precioTicketGuia}
-                            onChange={(e) => {
-                              const valClean = e.target.value.replace(/^0+(?=\d)/, "");
-                              const parsed = valClean === "" ? 0 : parseFloat(valClean);
-                              setPrecioTicketGuia(isNaN(parsed) ? 0 : parsed);
-                            }}
-                            className="w-16 h-6 p-0 border-none bg-transparent text-xs font-bold text-center text-foreground focus-visible:ring-0"
-                          />
-                        </div>
-                      ) : (
-                        <span className="font-bold text-foreground">Q{precioTicketGuia.toFixed(2)}</span>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -1071,20 +1098,15 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                       <IdCard className="h-4 w-4 text-primary" />
                       <span>¿Cuenta con número de carnet?</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Acreditación oficial de guía
-                    </p>
+                    <p className="text-xs text-muted-foreground">Acreditación oficial de guía</p>
                   </div>
-                  <Switch
-                    checked={tieneCarnetGuia}
-                    onCheckedChange={(checked) => setTieneCarnetGuia(checked)}
-                  />
+                  <Switch checked={tieneCarnetGuia} onCheckedChange={setTieneCarnetGuia} />
                 </div>
 
-                {tieneCarnetGuia ? (
+                {tieneCarnetGuia && (
                   <div className="space-y-1.5">
                     <Label htmlFor="numero_carnet_guia" className="text-xs text-muted-foreground">
-                      Número de Carnet / Acreditación (Registro interno del sistema)
+                      Número de Carnet / Acreditación
                     </Label>
                     <Input
                       id="numero_carnet_guia"
@@ -1094,89 +1116,85 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                       className="bg-background border-border/60 h-10 font-mono text-sm"
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      * El número de carnet solo se guardará en el sistema; no se imprimirá en el ticket por seguridad.
+                      * El número de carnet solo se guarda en el sistema; no se imprime en el ticket.
                     </p>
                   </div>
-                ) : (
-                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 space-y-3 text-xs text-amber-600 dark:text-amber-400">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold">Guía No Acreditado (Sin Carnet)</p>
-                        <p className="text-muted-foreground mt-0.5">
-                          Al no disponer de carnet, el sistema generará automáticamente un <strong>ticket independiente por separado</strong> para el guía.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-amber-500/20">
-                      <span className="font-semibold text-foreground">Forma de pago ticket de guía:</span>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setMetodoPagoGuia("efectivo")}
-                          className={`h-8 px-2.5 text-xs border cursor-pointer transition-colors ${
-                            metodoPagoGuia === "efectivo"
-                              ? "border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-200 font-bold hover:bg-amber-500/20"
-                              : "border-border/60 bg-background text-muted-foreground hover:border-amber-500/60 hover:bg-background"
-                          }`}
-                        >
-                          <Banknote className="h-3.5 w-3.5 text-emerald-500" />
-                          <span>Efectivo</span>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setMetodoPagoGuia("tarjeta")}
-                          className={`h-8 px-2.5 text-xs border cursor-pointer transition-colors ${
-                            metodoPagoGuia === "tarjeta"
-                              ? "border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-200 font-bold hover:bg-amber-500/20"
-                              : "border-border/60 bg-background text-muted-foreground hover:border-amber-500/60 hover:bg-background"
-                          }`}
-                        >
-                          <CreditCard className="h-3.5 w-3.5 text-blue-500" />
-                          <span>Tarjeta</span>
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 border-t border-amber-500/20">
-                      <span>Precio ticket de guía (Sin Carnet):</span>
-                      {modoEdicionPrecios ? (
-                        <div className="flex items-center gap-1 bg-background rounded px-2 py-0.5 border-2 border-emerald-500/60">
-                          <span className="font-semibold text-emerald-500">Q</span>
-                          <Input
-                            type="number"
-                            min={1}
-                            placeholder="0"
-                            value={precioTicketGuia === 0 ? "" : precioTicketGuia}
-                            onChange={(e) => {
-                              const valClean = e.target.value.replace(/^0+(?=\d)/, "");
-                              const parsed = valClean === "" ? 0 : parseFloat(valClean);
-                              setPrecioTicketGuia(isNaN(parsed) ? 0 : parsed);
-                            }}
-                            className="w-16 h-6 p-0 border-none bg-transparent text-xs font-bold text-center text-foreground focus-visible:ring-0"
-                          />
-                        </div>
-                      ) : (
-                        <span className="font-bold text-foreground">Q{precioTicketGuia.toFixed(2)}</span>
-                      )}
-                    </div>
-                  </div>
                 )}
+              </div>
+            )}
+
+            {/* Guía sin carnet: genera un ticket independiente con su propia forma de pago */}
+            {modoGuia !== "sin_guia" && !tieneCarnetGuia && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 space-y-3 text-xs text-amber-600 dark:text-amber-400">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">Guía No Acreditado (Sin Carnet)</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      Se generará un <strong>ticket independiente por separado</strong> para el guía.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-amber-500/20">
+                  <span className="font-semibold text-foreground">Forma de pago ticket de guía:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {catalogos.opcionesPago.map((o) => {
+                      const Icono = o.esEfectivo ? Banknote : CreditCard;
+                      return (
+                        <Button
+                          key={o.id}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIdOpcionPagoGuia(o.id)}
+                          className={cn(
+                            "h-8 px-2.5 text-xs border cursor-pointer transition-colors",
+                            idOpcionPagoGuia === o.id
+                              ? "border-amber-500 bg-amber-500/20 text-amber-800 dark:text-amber-200 font-bold hover:bg-amber-500/20"
+                              : "border-border/60 bg-background text-muted-foreground hover:border-amber-500/60 hover:bg-background",
+                          )}
+                        >
+                          <Icono
+                            className={cn(
+                              "h-3.5 w-3.5",
+                              o.esEfectivo ? "text-emerald-500" : "text-blue-500",
+                            )}
+                          />
+                          <span>{o.nombre}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-amber-500/20">
+                  <span>Precio ticket de guía (Sin Carnet):</span>
+                  {modoEdicionPrecios ? (
+                    <div className="flex items-center gap-1 bg-background rounded px-2 py-0.5 border-2 border-emerald-500/60">
+                      <span className="font-semibold text-emerald-500">Q</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="0"
+                        value={precioGuiaEditado}
+                        onChange={(e) => setPrecioGuiaEditado(e.target.value)}
+                        className="w-16 h-6 p-0 border-none bg-transparent text-xs font-bold text-center text-foreground focus-visible:ring-0"
+                      />
+                    </div>
+                  ) : (
+                    <span className="font-bold text-foreground">
+                      Q{precioTicketGuia.toFixed(2)}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
 
           {/* Notas */}
           <div className="space-y-2">
-            <Label
-              htmlFor="notas"
-              className="text-xs uppercase tracking-wider text-muted-foreground"
-            >
+            <Label htmlFor="notas" className="text-xs uppercase tracking-wider text-muted-foreground">
               Notas Adicionales (Opcional)
             </Label>
             <Textarea
@@ -1189,23 +1207,18 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
 
           <Separator />
 
-          {/* Resumen de total */}
+          {/* Resumen */}
           <div className="rounded-lg bg-muted/30 p-3 space-y-2">
             <div className="space-y-1 text-xs">
               {calculos.desgloses
                 .filter((d) => d.cantidad > 0)
                 .map((d) => {
-                  const etiqueta = CATEGORIAS_VISITANTE.find(
-                    (c) => c.valor === d.categoria,
-                  )!.etiqueta;
-                  const esGratuito = d.categoria === "nino_menor";
+                  const esGratuito = d.tipo.codigo === CODIGO_NINO_MENOR;
                   return (
-                    <div
-                      key={d.categoria}
-                      className="flex justify-between text-muted-foreground"
-                    >
+                    <div key={d.tipo.id} className="flex justify-between text-muted-foreground">
                       <span>
-                        {etiqueta} · {d.cantidad} {esGratuito ? "(Gratis)" : `× Q${d.precioUnitario.toFixed(2)}`}
+                        {d.tipo.nombre} · {d.cantidad}{" "}
+                        {esGratuito ? "(Gratis)" : `× Q${d.precioUnitario.toFixed(2)}`}
                       </span>
                       <span className="text-foreground font-medium tabular-nums">
                         {esGratuito ? "Q0.00" : `Q${d.subtotal.toFixed(2)}`}
@@ -1229,7 +1242,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Total a pagar ({atraccion === "cuevas" ? "Cuevas" : "Mariposario"}) ·{" "}
+                  Total a pagar ({atraccionActual?.nombre}) ·{" "}
                   <span className="text-foreground font-medium">
                     {calculos.totalPersonas}{" "}
                     {calculos.totalPersonas === 1 ? "persona" : "personas"}
@@ -1245,9 +1258,12 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                 Q{calculos.montoTotal.toFixed(2)}
               </p>
             </div>
+            <p className="text-[11px] text-muted-foreground text-center pt-1">
+              El monto final lo confirma el servidor al emitir el ticket.
+            </p>
           </div>
 
-          {/* Botón de envío */}
+          {/* Envío */}
           <div className="space-y-1.5">
             <Button
               type="submit"
@@ -1275,7 +1291,7 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
             </Button>
             {modoEdicionPrecios && (
               <p className="text-xs text-amber-500 font-medium text-center">
-                * Para evitar errores, la emisión de tickets está bloqueada mientras edita los precios. Presione &quot;Guardar Precios&quot; arriba para habilitar.
+                * La emisión está bloqueada mientras edita las tarifas.
               </p>
             )}
           </div>
