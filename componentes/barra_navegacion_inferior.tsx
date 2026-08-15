@@ -41,8 +41,8 @@ export function BarraNavegacionInferior() {
     ? modulosPermitidos.slice(4)
     : [];
 
-  // No mostrar en login o si no hay ningún módulo permitido
-  if (pathname === "/login" || modulosPermitidos.length === 0) return null;
+  // No mostrar en login, páginas públicas de pago o si no hay ningún módulo permitido
+  if (pathname === "/login" || pathname.startsWith("/pago") || modulosPermitidos.length === 0) return null;
 
   const estaActivo = (ruta: string) =>
     pathname === ruta || pathname.startsWith(ruta + "/");

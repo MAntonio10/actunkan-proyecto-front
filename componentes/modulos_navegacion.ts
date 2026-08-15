@@ -53,7 +53,7 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     id: 'cierre-diario',
     nombre: 'Cierre',
     nombreLargo: 'Caja y Cierre',
-    descripcion: 'Apertura, gastos y arqueo',
+    descripcion: 'Apertura, arqueo y cierre',
     icono: Calculator,
     iconoDesktop: Calculator,
     ruta: '/cierre-diario',

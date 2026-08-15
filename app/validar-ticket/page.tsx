@@ -281,7 +281,7 @@ export default function ValidarTicketPage() {
                       <div className="flex justify-between gap-3">
                         <span className="text-muted-foreground">Titular</span>
                         <span className="font-medium text-foreground text-right">
-                          {resultado.ticket.nombre || resultado.ticket.nombreGuia || '—'}
+                          {resultado.ticket.nombre || resultado.ticket.guia?.nombre || '—'}
                         </span>
                       </div>
                       <div className="flex justify-between gap-3">

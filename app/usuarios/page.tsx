@@ -505,10 +505,19 @@ export default function ModuloUsuariosHubPage() {
     }
 
     // El usuario puede arrastrar permisos sobre módulos de infraestructura
-    // (Modulos, Acciones) concedidos antes de que el backend los marcara como
-    // no asignables. Reenviarlos provoca un 400, así que se descartan aquí:
-    // GET /modulo-acciones ya devuelve únicamente los asignables.
-    const idsAsignables = new Set(asignables.map((ma) => ma.id))
+    // (Modulos, Acciones) o módulos deprecados (Gastos) concedidos antes de que
+    // el backend los marcara como no asignables. Reenviarlos provoca un 400,
+    // así que se descartan aquí.
+    const modulosOcultos = new Set(
+      modulos
+        .filter((m) => m.nombre?.toLowerCase().trim() === 'gastos')
+        .map((m) => m.id)
+    )
+    const idsAsignables = new Set(
+      asignables
+        .filter((ma) => !modulosOcultos.has(ma.idModulo))
+        .map((ma) => ma.id)
+    )
     const idsActuales = (u.permiso?.map((p) => p.idModuloAccion) || []).filter((id) =>
       idsAsignables.has(id)
     )
@@ -1497,6 +1506,7 @@ export default function ModuloUsuariosHubPage() {
                       (m) =>
                         !m.anulado &&
                         m.esAsignable !== false &&
+                        m.nombre?.toLowerCase().trim() !== 'gastos' &&
                         // GET /modulo-acciones ya viene filtrado a lo asignable:
                         // un módulo sin asociaciones ahí no se puede conceder.
                         moduloAcciones.some((ma) => ma.idModulo === m.id)

@@ -970,6 +970,17 @@ export interface GuiaCatalogo {
   tieneCarnet: boolean
 }
 
+// El catálogo de /guias no tiene alta propia: un guía nuevo se registra dentro
+// de POST /tickets/emitir. Estos endpoints sirven para consultar, corregir y
+// dar de baja. El número de carnet nunca se imprime en el pase.
+export interface GuiaBackend extends GuiaCatalogo {
+  numeroCarnet?: string | null
+  anulado: boolean
+  fechaCreacion?: string
+  fechaActualizacion?: string
+  _count?: { tickets: number }
+}
+
 export interface TarifaBackend {
   idAtraccion: number
   idOrigen: number
@@ -1003,11 +1014,15 @@ export interface TicketPago {
 
 export interface TicketBackend {
   id: number
+  // Comparten idGrupoEmision el ticket del visitante y el de su guía sin carnet
+  idGrupoEmision?: number
+  idGuia?: number | null
   numeroTicket: string
   tipoTicket: 'VISITANTE' | 'GUIA'
-  nombre?: string
+  nombre?: string | null
   cantidadPersonas: number
   montoTotal: string
+  observaciones?: string | null
   // `qr` es la cadena exacta que debe codificarse en el código QR impreso.
   qr?: string
   qrFirma?: string
@@ -1015,13 +1030,22 @@ export interface TicketBackend {
   origen?: CatalogoCodificado
   pais?: PaisCatalogo | null
   tipoRecorrido?: CatalogoCodificado
-  nombreGuia?: string
-  tieneCarnetGuia?: boolean
+  // El guía llega como objeto, no como campos planos, y viene poblado tanto en
+  // el ticket del visitante como en el de tipo GUIA. Es null si no hubo guía.
+  guia?: GuiaCatalogo | null
+  usuario?: { id: number; nombre: string; correo?: string }
   fechaCreacion?: string
+  fechaActualizacion?: string
   fechaUso?: string | null
+  idUsuarioUso?: number | null
   anulado?: boolean
   visitantePorTickets?: VisitantePorTicket[]
   ticketPagos?: TicketPago[]
+  // Pasarela de Pagos (Recurrente / Tarjeta)
+  estadoPago?: 'PENDIENTE' | 'PAGADO' | 'CANCELADO' | string
+  checkoutUrl?: string | null
+  checkout_url?: string | null
+  idCheckout?: string | null
 }
 
 export interface RespuestaEmisionTicket {
@@ -1030,6 +1054,39 @@ export interface RespuestaEmisionTicket {
   montoGuia: string
   montoTotalGeneral: string
   tickets: TicketBackend[]
+  checkoutUrl?: string | null
+  checkout_url?: string | null
+  idCheckout?: string | null
+  estadoPago?: string
+}
+
+export interface TicketConfirmadoPago {
+  numeroTicket: string
+  nombre?: string | null
+  personas?: number
+  cantidadPersonas?: number
+  atraccion?: string | CatalogoCodificado
+  monto?: number | string
+}
+
+export interface RespuestaConfirmacionPago {
+  pagado: boolean
+  mensaje?: string
+  monto?: number | string
+  ticket?: TicketConfirmadoPago
+}
+
+export interface RespuestaPagoTicket {
+  id?: number
+  idTicket?: number
+  estado?: 'PENDIENTE' | 'PAGADO' | 'CANCELADO' | string
+  estadoPago?: 'PENDIENTE' | 'PAGADO' | 'CANCELADO' | string
+  checkoutUrl?: string | null
+  checkout_url?: string | null
+  idCheckout?: string | null
+  monto?: number | string
+  ticket?: TicketBackend
+  [key: string]: unknown
 }
 
 export interface GuiaEmision {
@@ -1168,5 +1225,42 @@ export interface FiltrosCajas {
   fechaInicio?: string
   fechaFin?: string
   incluirAnulados?: boolean
+}
+
+// Historial de cierres: vista de supervisión (Cajas/Editar). Incluye los
+// anulados, que son la señal de que una caja se reabrió para corregir un monto.
+export interface CierreCajaHistorial extends CierreCajaBackend {
+  aperturaCaja?: {
+    id: number
+    montoInicial: string
+    usuario?: { id: number; nombre: string; correo?: string }
+    estado?: EstadoCaja
+  }
+}
+
+export interface MetricasCierres {
+  totalCierres: number
+  totalContado: string
+  totalEsperado: string
+  /** Negativa es faltante acumulado; positiva, sobrante. */
+  diferenciaAcumulada: string
+}
+
+export interface RespuestaHistorialCierres {
+  datos: CierreCajaHistorial[]
+  total: number
+  pagina: number
+  limite: number
+  metricas: MetricasCierres
+}
+
+export interface FiltrosCierres {
+  idUsuario?: number
+  fechaInicio?: string
+  fechaFin?: string
+  soloAnulados?: boolean
+  incluirAnulados?: boolean
+  pagina?: number
+  limite?: number
 }
 

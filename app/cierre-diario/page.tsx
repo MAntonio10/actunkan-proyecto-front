@@ -12,14 +12,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Spinner } from '@/components/ui/spinner'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -28,35 +20,26 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Calculator,
   DollarSign,
   Banknote,
   Lock,
   LockOpen,
   CheckCircle,
-  Receipt,
-  Plus,
-  Trash2,
-  TrendingDown,
   TrendingUp,
   AlertCircle,
   RefreshCw,
+  EyeOff,
+  ClipboardCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
+import { HistorialCierresCaja } from '@/componentes/historial_cierres_caja'
+import { cn } from '@/lib/utils'
 import {
   type AperturaCajaBackend,
   type ArqueoCaja,
-  type GastoBackend,
-  type TipoGastoBackend,
 } from '@/tipos'
 
 // Los montos son Decimal(18,4) en Prisma y viajan como cadena ("500.0000")
@@ -85,16 +68,17 @@ export default function CierreDiarioPage() {
   // (GET /modulos/mis-modulos) porque es la lista de acciones realmente
   // concedidas; usuario.permiso de /auth/me no siempre viene expandido.
   const puedeOperarCaja = puedeAccion('Cajas', 'Crear')
-  const puedeVerGastos = puedeAccion('Gastos', 'Ver')
-  const puedeCrearGastos = puedeAccion('Gastos', 'Crear')
-  const puedeAnularGastos = puedeAccion('Gastos', 'Anular')
+  // Cajas/Editar es supervisión: ver el arqueo previo, anular un cierre y
+  // consultar el historial. Quien cuenta el efectivo no debe ver el monto
+  // esperado antes de contarlo, o el arqueo deja de ser un control.
+  const puedeSupervisar = puedeAccion('Cajas', 'Editar')
 
   const [cajaActual, setCajaActual] = useState<AperturaCajaBackend | null>(null)
   const [arqueo, setArqueo] = useState<ArqueoCaja | null>(null)
-  const [gastos, setGastos] = useState<GastoBackend[]>([])
-  const [tiposGasto, setTiposGasto] = useState<TipoGastoBackend[]>([])
   const [cargando, setCargando] = useState(true)
   const [pestana, setPestana] = useState('caja')
+  // Se incrementa al cerrar una caja, para que el historial de cierres lo vea
+  const [refrescarCierres, setRefrescarCierres] = useState(0)
 
   // Apertura
   const [dialogoApertura, setDialogoApertura] = useState(false)
@@ -108,43 +92,23 @@ export default function CierreDiarioPage() {
   const [observacionesCierre, setObservacionesCierre] = useState('')
   const [cerrando, setCerrando] = useState(false)
 
-  // Gasto nuevo
-  const [idTipoGasto, setIdTipoGasto] = useState('')
-  const [descripcionGasto, setDescripcionGasto] = useState('')
-  const [montoGasto, setMontoGasto] = useState('')
-  const [guardandoGasto, setGuardandoGasto] = useState(false)
-
   const cargarTodo = useCallback(async () => {
     setCargando(true)
     try {
       const caja = await api.cajas.getActual()
       setCajaActual(caja)
 
-      setArqueo(caja ? await api.cajas.getArqueo(caja.id).catch(() => null) : null)
-
-      // Gastos y su catálogo exigen permiso propio (sub-módulo Gastos): sin él
-      // ni se piden, para no provocar un 403 inútil. Sí se consultan aunque no
-      // haya caja abierta — registrar exige caja, consultar el histórico no.
-      if (puedeVerGastos) {
-        const resGastos = await api.gastos
-          .listar(caja ? { idAperturaCaja: caja.id } : undefined)
-          .catch(() => [])
-        setGastos(Array.isArray(resGastos) ? resGastos : [])
-      } else {
-        setGastos([])
-      }
-
-      if (puedeCrearGastos) {
-        const tipos = await api.tiposGasto.listar().catch(() => [])
-        setTiposGasto(Array.isArray(tipos) ? tipos : [])
-      }
+      // El arqueo previo solo lo puede pedir un supervisor (Cajas/Editar)
+      setArqueo(
+        caja && puedeSupervisar ? await api.cajas.getArqueo(caja.id).catch(() => null) : null,
+      )
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : 'No se pudo cargar el estado de caja'
       toast.error('Error al cargar la caja', { description: mensaje })
     } finally {
       setCargando(false)
     }
-  }, [puedeVerGastos, puedeCrearGastos])
+  }, [puedeSupervisar])
 
   useEffect(() => {
     cargarTodo()
@@ -188,16 +152,16 @@ export default function CierreDiarioPage() {
         montoContado: monto,
         observaciones: observacionesCierre || undefined,
       })
-      const diferencia = aNumero(res.cierre.diferencia)
-      toast.success('Caja cerrada', {
-        description:
-          diferencia === 0
-            ? 'El arqueo cuadró exactamente.'
-            : `Diferencia de ${moneda(diferencia)} (${diferencia > 0 ? 'sobrante' : 'faltante'}).`,
-      })
+      const diferencia = aNumero(res.cierre?.diferencia)
+      const detalleDif =
+        diferencia === 0
+          ? 'Arqueo exacto sin diferencia'
+          : `Diferencia: ${moneda(diferencia)} (${diferencia > 0 ? 'sobrante' : 'faltante'})`
+      toast.success('Caja cerrada exitosamente', { description: detalleDif })
       setDialogoCierre(false)
       setMontoContado('')
       setObservacionesCierre('')
+      setRefrescarCierres((n) => n + 1)
       await cargarTodo()
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : 'No se pudo cerrar la caja'
@@ -207,53 +171,6 @@ export default function CierreDiarioPage() {
     }
   }
 
-  const handleAgregarGasto = async () => {
-    const monto = parseFloat(montoGasto)
-    if (!idTipoGasto) {
-      toast.error('Seleccione el tipo de gasto')
-      return
-    }
-    if (!descripcionGasto.trim()) {
-      toast.error('Ingrese la descripción del gasto')
-      return
-    }
-    if (isNaN(monto) || monto <= 0) {
-      toast.error('El monto del gasto debe ser mayor a Q0.00')
-      return
-    }
-
-    setGuardandoGasto(true)
-    try {
-      await api.gastos.crear({
-        idTipoGasto: Number(idTipoGasto),
-        descripcion: descripcionGasto.trim(),
-        monto,
-      })
-      toast.success('Gasto registrado', { description: `${descripcionGasto} · ${moneda(monto)}` })
-      setIdTipoGasto('')
-      setDescripcionGasto('')
-      setMontoGasto('')
-      await cargarTodo()
-    } catch (err: unknown) {
-      const mensaje = err instanceof Error ? err.message : 'No se pudo registrar el gasto'
-      toast.error('Error al registrar el gasto', { description: mensaje })
-    } finally {
-      setGuardandoGasto(false)
-    }
-  }
-
-  const handleAnularGasto = async (gasto: GastoBackend) => {
-    try {
-      await api.gastos.anular(gasto.id)
-      toast.success('Gasto anulado')
-      await cargarTodo()
-    } catch (err: unknown) {
-      const mensaje = err instanceof Error ? err.message : 'No se pudo anular el gasto'
-      toast.error('Error al anular el gasto', { description: mensaje })
-    }
-  }
-
-  const gastosVigentes = gastos.filter((g) => !g.anulado)
   const diferenciaPreview =
     arqueo && montoContado !== ''
       ? parseFloat(montoContado) - aNumero(arqueo.montoEsperado)
@@ -272,7 +189,7 @@ export default function CierreDiarioPage() {
                 Caja y Cierre Contable
               </h1>
               <p className="text-muted-foreground text-sm mt-0.5">
-                Apertura, gastos y arqueo de la caja del turno
+                Apertura, arqueo y cierre de la caja del turno
               </p>
             </div>
 
@@ -317,28 +234,24 @@ export default function CierreDiarioPage() {
             </div>
           ) : (
             <>
-              {/* Gastos es un sub-módulo con permiso propio: sin él no se
-                  muestra la pestaña y queda solo el arqueo. Las pestañas
-                  existen haya o no caja abierta: registrar un gasto exige caja,
-                  pero consultar el histórico no. */}
-              {puedeVerGastos && (
+              {puedeSupervisar && (
                 <div className="mb-4">
                   <Tabs value={pestana} onValueChange={setPestana}>
-                    <TabsList className="grid grid-cols-2 w-full sm:w-[320px] bg-muted/60 p-1">
+                    <TabsList className="grid w-full bg-muted/60 p-1 gap-1 grid-cols-2 sm:w-[320px]">
                       <TabsTrigger value="caja" className="gap-2 font-semibold cursor-pointer">
                         <Calculator className="h-4 w-4 text-primary" />
                         Arqueo
                       </TabsTrigger>
-                      <TabsTrigger value="gastos" className="gap-2 font-semibold cursor-pointer">
-                        <Receipt className="h-4 w-4 text-primary" />
-                        Gastos ({gastosVigentes.length})
+                      <TabsTrigger value="cierres" className="gap-2 font-semibold cursor-pointer">
+                        <ClipboardCheck className="h-4 w-4 text-primary" />
+                        Cierres
                       </TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
               )}
 
-              {(pestana === 'caja' || !puedeVerGastos) && !cajaActual && (
+              {pestana === 'caja' && !cajaActual && (
                 <Card className="bg-card/80 backdrop-blur-sm border-amber-500/40">
                   <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center">
                     <div className="h-16 w-16 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center">
@@ -348,8 +261,8 @@ export default function CierreDiarioPage() {
                       <h2 className="text-xl font-bold text-foreground">No hay caja abierta</h2>
                       <p className="text-sm text-muted-foreground leading-relaxed">
                         {puedeOperarCaja
-                          ? 'Debe abrir la caja antes de poder emitir tickets o registrar gastos. Solo puede existir una caja abierta a la vez en todo el sistema.'
-                          : 'Sin una caja abierta no se pueden emitir tickets ni registrar gastos. Su cuenta solo tiene permiso de consulta: solicite a un encargado que abra la caja.'}
+                          ? 'Debe abrir la caja antes de poder emitir tickets. Solo puede existir una caja abierta a la vez en todo el sistema.'
+                          : 'Sin una caja abierta no se pueden emitir tickets. Su cuenta solo tiene permiso de consulta: solicite a un encargado que abra la caja.'}
                       </p>
                     </div>
                     {puedeOperarCaja && (
@@ -365,7 +278,7 @@ export default function CierreDiarioPage() {
                 </Card>
               )}
 
-              {(pestana === 'caja' || !puedeVerGastos) && cajaActual && (
+              {pestana === 'caja' && cajaActual && (
                 <div className="space-y-6">
                   {/* Estado de la caja abierta */}
                   <Card className="bg-primary/5 border-primary/30">
@@ -392,8 +305,31 @@ export default function CierreDiarioPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Arqueo calculado por el servidor */}
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* El arqueo previo es supervisión: quien cuenta el efectivo
+                      no debe ver el monto esperado antes de contarlo. */}
+                  {!puedeSupervisar && (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+                      <CardContent className="p-4 flex items-start gap-3">
+                        <EyeOff className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-semibold text-foreground">
+                            Arqueo reservado a supervisión
+                          </p>
+                          <p className="text-muted-foreground mt-0.5">
+                            El monto esperado no se muestra a quien cuenta el efectivo. Al cerrar,
+                            ingrese lo contado físicamente; el sistema registrará la diferencia.
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <div
+                    className={cn(
+                      'grid gap-4',
+                      puedeSupervisar ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1',
+                    )}
+                  >
                     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
                       <CardContent className="pt-6">
                         <div className="flex items-start justify-between">
@@ -408,247 +344,69 @@ export default function CierreDiarioPage() {
                       </CardContent>
                     </Card>
 
-                    <Card className="bg-emerald-500/10 border-emerald-500/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm text-muted-foreground">Ventas en Efectivo</p>
-                            <p className="text-2xl font-bold text-emerald-600">
-                              {moneda(arqueo?.ventasEfectivo)}
-                            </p>
-                          </div>
-                          <TrendingUp className="h-7 w-7 text-emerald-500/60" />
-                        </div>
-                      </CardContent>
-                    </Card>
+                    {puedeSupervisar && (
+                      <>
+                        <Card className="bg-emerald-500/10 border-emerald-500/30">
+                          <CardContent className="pt-6">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="text-sm text-muted-foreground">Ventas en Efectivo</p>
+                                <p className="text-2xl font-bold text-emerald-600">
+                                  {moneda(arqueo?.ventasEfectivo)}
+                                </p>
+                              </div>
+                              <TrendingUp className="h-7 w-7 text-emerald-500/60" />
+                            </div>
+                          </CardContent>
+                        </Card>
 
-                    <Card className="bg-destructive/10 border-destructive/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm text-muted-foreground">Gastos</p>
-                            <p className="text-2xl font-bold text-destructive">
-                              −{moneda(arqueo?.totalGastos)}
-                            </p>
-                          </div>
-                          <TrendingDown className="h-7 w-7 text-destructive/60" />
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="bg-primary/10 border-primary/30">
-                      <CardContent className="pt-6">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-sm text-muted-foreground">Monto Esperado</p>
-                            <p className="text-2xl font-bold text-primary">
-                              {moneda(arqueo?.montoEsperado)}
-                            </p>
-                          </div>
-                          <Banknote className="h-7 w-7 text-primary/60" />
-                        </div>
-                      </CardContent>
-                    </Card>
+                        <Card className="bg-primary/10 border-primary/30">
+                          <CardContent className="pt-6">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="text-sm text-muted-foreground">Monto Esperado</p>
+                                <p className="text-2xl font-bold text-primary">
+                                  {moneda(arqueo?.montoEsperado)}
+                                </p>
+                              </div>
+                              <Banknote className="h-7 w-7 text-primary/60" />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </>
+                    )}
                   </div>
 
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base">Cómo se calcula el arqueo</CardTitle>
-                      <CardDescription>
-                        El servidor calcula el monto esperado; al cerrar se compara contra lo
-                        contado físicamente.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground font-mono bg-muted/40 rounded-lg p-3">
-                        {moneda(arqueo?.montoInicial)} (fondo) + {moneda(arqueo?.ventasEfectivo)}{' '}
-                        (ventas efectivo) − {moneda(arqueo?.totalGastos)} (gastos) ={' '}
-                        <span className="text-foreground font-bold">
-                          {moneda(arqueo?.montoEsperado)}
-                        </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Las ventas con tarjeta no entran al arqueo de efectivo.
-                      </p>
-                    </CardContent>
-                  </Card>
+                  {puedeSupervisar && (
+                    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base">Cómo se calcula el arqueo</CardTitle>
+                        <CardDescription>
+                          El servidor calcula el monto esperado sumando el fondo inicial y las ventas en efectivo; al cerrar se compara contra lo contado físicamente.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm text-muted-foreground font-mono bg-muted/40 rounded-lg p-3">
+                          {moneda(arqueo?.montoInicial)} (fondo) + {moneda(arqueo?.ventasEfectivo)}{' '}
+                          (ventas efectivo) ={' '}
+                          <span className="text-foreground font-bold">
+                            {moneda(arqueo?.montoEsperado)}
+                          </span>
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Las ventas con tarjeta no entran al arqueo de efectivo de caja.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
               )}
 
-              {pestana === 'gastos' && puedeVerGastos && (
-                <div className="space-y-6">
-                  {/* Un gasto solo puede crearse contra una caja abierta: sin
-                      ella el backend responde 400, así que se avisa en vez de
-                      mostrar un formulario que fallaría al enviarse. */}
-                  {puedeCrearGastos && !cajaActual && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-amber-500/40">
-                      <CardContent className="p-4 flex items-start gap-3">
-                        <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-                        <div className="text-sm">
-                          <p className="font-semibold text-foreground">
-                            No se pueden registrar gastos ahora
-                          </p>
-                          <p className="text-muted-foreground mt-0.5">
-                            Los gastos se cargan contra la caja abierta. Abra una caja para poder
-                            registrarlos; abajo puede consultar los ya registrados.
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* Registrar gasto contra la caja abierta */}
-                  {puedeCrearGastos && cajaActual && (
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Plus className="h-4 w-4 text-primary" />
-                        Registrar Gasto
-                      </CardTitle>
-                      <CardDescription>
-                        Se descuenta del arqueo. Solo se puede registrar con la caja abierta.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Tipo de Gasto</Label>
-                          <Select value={idTipoGasto} onValueChange={setIdTipoGasto}>
-                            <SelectTrigger className="h-10 bg-muted/50 border-border/50">
-                              <SelectValue placeholder="Seleccione..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {tiposGasto
-                                .filter((t) => !t.anulado)
-                                .map((t) => (
-                                  <SelectItem key={t.id} value={String(t.id)}>
-                                    {t.nombre}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-1.5 sm:col-span-1">
-                          <Label className="text-xs text-muted-foreground">Descripción</Label>
-                          <Input
-                            placeholder="Ej. Compra de insumos"
-                            value={descripcionGasto}
-                            onChange={(e) => setDescripcionGasto(e.target.value)}
-                            className="h-10 bg-muted/50 border-border/50"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Monto (Q)</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            placeholder="0.00"
-                            value={montoGasto}
-                            onChange={(e) => setMontoGasto(e.target.value)}
-                            className="h-10 bg-muted/50 border-border/50"
-                          />
-                        </div>
-                      </div>
-
-                      <Button
-                        onClick={handleAgregarGasto}
-                        disabled={guardandoGasto}
-                        className="w-full sm:w-auto gap-2 cursor-pointer"
-                      >
-                        {guardandoGasto ? (
-                          <Spinner className="h-4 w-4" />
-                        ) : (
-                          <Plus className="h-4 w-4" />
-                        )}
-                        Registrar Gasto
-                      </Button>
-                    </CardContent>
-                  </Card>
-                  )}
-
-                  {/* Gastos de la caja actual */}
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Receipt className="h-4 w-4 text-primary" />
-                        {cajaActual ? 'Gastos de esta caja' : 'Gastos registrados'}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="border-border/50">
-                            <TableHead>Tipo</TableHead>
-                            <TableHead>Descripción</TableHead>
-                            <TableHead className="text-right">Monto</TableHead>
-                            <TableHead>Fecha</TableHead>
-                            <TableHead className="w-[80px]" />
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {gastos.length === 0 ? (
-                            <TableRow>
-                              <TableCell
-                                colSpan={5}
-                                className="text-center py-8 text-muted-foreground text-sm"
-                              >
-                                No hay gastos registrados en esta caja.
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            gastos.map((g) => (
-                              <TableRow
-                                key={g.id}
-                                className={`border-border/30 ${g.anulado ? 'opacity-50' : ''}`}
-                              >
-                                <TableCell className="font-medium">
-                                  {g.tipoGasto?.nombre || '—'}
-                                </TableCell>
-                                <TableCell className="text-sm">
-                                  {g.descripcion}
-                                  {g.anulado && (
-                                    <Badge
-                                      variant="outline"
-                                      className="ml-2 text-[10px] border-destructive/40 text-destructive"
-                                    >
-                                      Anulado
-                                    </Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right font-mono font-semibold">
-                                  {moneda(g.monto)}
-                                </TableCell>
-                                <TableCell className="text-xs text-muted-foreground">
-                                  {formatearFechaHora(g.fechaCreacion)}
-                                </TableCell>
-                                <TableCell>
-                                  {/* Anular exige que la caja del gasto siga
-                                      abierta; en una cerrada el backend da 400 */}
-                                  {!g.anulado &&
-                                    puedeAnularGastos &&
-                                    g.idAperturaCaja === cajaActual?.id && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => handleAnularGasto(g)}
-                                      className="h-8 w-8 text-destructive hover:bg-destructive/10 cursor-pointer"
-                                      aria-label="Anular gasto"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </div>
+              {pestana === 'cierres' && puedeSupervisar && (
+                <HistorialCierresCaja
+                  refrescarToken={refrescarCierres}
+                  onCambio={cargarTodo}
+                />
               )}
             </>
           )}
@@ -714,12 +472,26 @@ export default function CierreDiarioPage() {
             </DialogHeader>
 
             <div className="space-y-4 py-2">
-              <div className="rounded-lg bg-muted/50 p-3 space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Monto esperado</span>
-                  <span className="font-bold text-foreground">{moneda(arqueo?.montoEsperado)}</span>
+              {/* El monto esperado solo se muestra a supervisión: verlo antes
+                  de contar invalida el arqueo como control. */}
+              {puedeSupervisar ? (
+                <div className="rounded-lg bg-muted/50 p-3 space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Monto esperado</span>
+                    <span className="font-bold text-foreground">
+                      {moneda(arqueo?.montoEsperado)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-3 flex items-start gap-2 text-xs text-muted-foreground">
+                  <EyeOff className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    Cuente el efectivo e ingrese el total. El sistema comparará contra lo esperado
+                    y dejará registrada la diferencia.
+                  </span>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="monto-contado">Monto Contado (Q)</Label>
@@ -733,7 +505,7 @@ export default function CierreDiarioPage() {
                   onChange={(e) => setMontoContado(e.target.value)}
                   className="h-11"
                 />
-                {diferenciaPreview !== null && !isNaN(diferenciaPreview) && (
+                {puedeSupervisar && diferenciaPreview !== null && !isNaN(diferenciaPreview) && (
                   <p
                     className={`text-sm font-medium ${
                       diferenciaPreview === 0

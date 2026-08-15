@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -37,18 +37,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
+import { SelectorGuia } from "./selector_guia";
 
 import {
   type CatalogosTickets,
@@ -111,9 +105,15 @@ export interface DatosTicketPreview {
 interface Props {
   onDatosChange?: (datos: DatosTicketPreview) => void;
   onTicketEmitido?: (respuesta: RespuestaEmisionTicket) => void;
+  /** Comparte los catálogos hacia arriba para que no se pidan dos veces. */
+  onCatalogosCargados?: (catalogos: CatalogosTickets) => void;
 }
 
-export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: Props) {
+export function FormularioVisitanteCompleto({
+  onDatosChange,
+  onTicketEmitido,
+  onCatalogosCargados,
+}: Props) {
   const [catalogos, setCatalogos] = useState<CatalogosTickets | null>(null);
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
@@ -159,11 +159,19 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
 
   const nombreGrupo = watch("nombre_grupo");
 
+  const onCatalogosCargadosRef = useRef(onCatalogosCargados);
+  useEffect(() => {
+    onCatalogosCargadosRef.current = onCatalogosCargados;
+  }, [onCatalogosCargados]);
+
   const cargarCatalogos = useCallback(async () => {
     setCargandoCatalogos(true);
     try {
       const res = await api.tickets.getCatalogos();
       setCatalogos(res);
+      // Por ref: si dependiera del prop, un cambio de identidad del callback
+      // volvería a disparar la carga de catálogos.
+      onCatalogosCargadosRef.current?.(res);
 
       // Valores iniciales: primera opción de cada catálogo
       setIdAtraccion((prev) => prev ?? res.atracciones[0]?.id ?? null);
@@ -424,15 +432,6 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
     }
   };
 
-  const handleSeleccionarGuiaExistente = (valor: string) => {
-    const id = Number(valor);
-    setIdGuiaSeleccionado(id);
-    const guia = catalogos?.guias.find((g) => g.id === id);
-    if (guia) {
-      setNombreGuiaInput(guia.nombre);
-      setTieneCarnetGuia(guia.tieneCarnet);
-    }
-  };
 
   const onSubmit = async (datos: FormValues) => {
     if (!idAtraccion || !idOrigen || !idTipoRecorrido || !idOpcionPago) {
@@ -1033,14 +1032,14 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    // No se preselecciona ningún guía: el selector trae su
+                    // propia lista y elegir uno por defecto arriesga emitir
+                    // el ticket con el guía equivocado.
                     setModoGuia(modo);
                     setNombreGuiaInput("");
                     setNumeroCarnetGuiaInput("");
                     setIdGuiaSeleccionado(null);
                     setTieneCarnetGuia(true);
-                    if (modo === "existente" && catalogos.guias.length > 0) {
-                      handleSeleccionarGuiaExistente(String(catalogos.guias[0].id));
-                    }
                   }}
                   className={cn(
                     "text-[11px] sm:text-xs h-auto min-h-[2.25rem] py-1.5 px-1 whitespace-normal text-center leading-tight border-2 cursor-pointer transition-colors",
@@ -1055,25 +1054,16 @@ export function FormularioVisitanteCompleto({ onDatosChange, onTicketEmitido }: 
             </div>
 
             {modoGuia === "existente" && (
-              <div className="space-y-3 pt-2">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Seleccionar Guía Registrado</Label>
-                  <Select
-                    value={idGuiaSeleccionado ? String(idGuiaSeleccionado) : ""}
-                    onValueChange={handleSeleccionarGuiaExistente}
-                  >
-                    <SelectTrigger className="bg-background border-border/60 h-10">
-                      <SelectValue placeholder="Seleccione un guía..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {catalogos.guias.map((g) => (
-                        <SelectItem key={g.id} value={String(g.id)}>
-                          {g.nombre} {g.tieneCarnet ? "(Acreditado)" : "(Sin Carnet)"}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="pt-2">
+                <SelectorGuia
+                  idSeleccionado={idGuiaSeleccionado}
+                  onSeleccionar={(g) => {
+                    setIdGuiaSeleccionado(g.id);
+                    setNombreGuiaInput(g.nombre);
+                    setTieneCarnetGuia(g.tieneCarnet);
+                    setNumeroCarnetGuiaInput(g.numeroCarnet || "");
+                  }}
+                />
               </div>
             )}
 

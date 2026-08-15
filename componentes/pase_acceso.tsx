@@ -15,6 +15,7 @@ import { LogosInstitucionales } from './logos_institucionales'
 import { type TicketBackend } from '@/tipos'
 import { type DatosTicketPreview } from './formulario_visitante_completo'
 import { CodigoQR } from './codigo_qr'
+import { esPagoPendiente } from '@/lib/utils_pagos'
 
 interface PaseAccesoProps {
   /** Vista previa en vivo mientras se llena el formulario (aún sin emitir). */
@@ -102,9 +103,22 @@ function TicketEmitidoRender({
 }) {
   const esGuia = ticket.tipoTicket === 'GUIA'
   const opcionPago = ticket.ticketPagos?.[0]
+  const tienePagoPendiente = esPagoPendiente(ticket.estadoPago)
 
   return (
     <>
+      {tienePagoPendiente && (
+        <div className="rounded-lg bg-amber-500/15 border-2 border-amber-500/40 p-3 flex flex-col gap-1 text-xs text-amber-900 dark:text-amber-300 shadow-xs">
+          <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>Pago Pendiente de Confirmación</span>
+          </div>
+          <p className="text-[11px] leading-relaxed">
+            Este ticket no autoriza el acceso a las instalaciones hasta que el pago con tarjeta sea confirmado en la pasarela.
+          </p>
+        </div>
+      )}
+
       {esGuia && (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-2.5 flex items-center justify-between text-xs text-amber-600 dark:text-amber-400">
           <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
@@ -141,20 +155,20 @@ function TicketEmitidoRender({
           {esGuia ? 'Nombre del Guía' : 'Titular / Grupo'}
         </span>
         <p className="text-xl font-bold mt-0.5 tracking-wide text-foreground">
-          {ticket.nombre || ticket.nombreGuia || '...'}
+          {ticket.nombre || ticket.guia?.nombre || '...'}
         </p>
       </div>
 
-      {!esGuia && ticket.nombreGuia && (
+      {!esGuia && ticket.guia && (
         <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-0.5">
           <span className="text-[10px] uppercase font-bold tracking-wider text-primary block">
             Guía Acompañante
           </span>
           <p className="text-base font-extrabold text-foreground tracking-wide uppercase">
-            {ticket.nombreGuia}
+            {ticket.guia.nombre}
           </p>
           <p className="text-[11px] text-muted-foreground font-medium">
-            {ticket.tieneCarnetGuia ? 'Guía Acreditado' : 'Ticket Independiente'}
+            {ticket.guia.tieneCarnet ? 'Guía Acreditado' : 'Ticket Independiente'}
           </p>
         </div>
       )}
@@ -222,8 +236,14 @@ function TicketEmitidoRender({
             >
               <CodigoQR valor={ticket.qr} size={esGuia ? 180 : 208} />
             </div>
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground mt-2 font-medium">
-              Escanee para validar ticket
+            <span
+              className={`text-[11px] font-medium mt-2 text-center ${
+                tienePagoPendiente
+                  ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                  : 'uppercase tracking-wider text-muted-foreground'
+              }`}
+            >
+              {tienePagoPendiente ? '⚠️ Inactivo hasta confirmar pago' : 'Escanee para validar ticket'}
             </span>
           </>
         ) : (

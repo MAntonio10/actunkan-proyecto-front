@@ -87,7 +87,7 @@ export function RutaProtegida({
   const obtenerRutaPermitida = () => {
     if (tieneAccesoModulo('EmisionTickets')) return '/registro-visitantes'
     if (tieneAccesoModulo('Usuarios') || tieneAccesoModulo('Puestos')) return '/usuarios'
-    if (tieneAccesoModulo('Cajas') || tieneAccesoModulo('Gastos')) return '/cierre-diario'
+    if (tieneAccesoModulo('Cajas')) return '/cierre-diario'
     if (tieneAccesoModulo('Bitacora')) return '/bitacora'
     if (tieneAccesoModulo('Donaciones')) return '/donaciones'
     if (tieneAccesoModulo('Reportes')) return '/reportes'

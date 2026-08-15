@@ -18,13 +18,18 @@ import {
   TicketBackend,
   FiltrosTickets,
   TarifaBackend,
+  GuiaBackend,
   AperturaCajaBackend,
   RespuestaCajaActual,
   ArqueoCaja,
   RespuestaCierreCaja,
   FiltrosCajas,
+  FiltrosCierres,
+  RespuestaHistorialCierres,
   GastoBackend,
   TipoGastoBackend,
+  RespuestaConfirmacionPago,
+  RespuestaPagoTicket,
 } from '@/tipos'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
@@ -50,7 +55,11 @@ function rutaDe(endpoint: string): string {
 }
 
 function esEndpointPublico(endpoint: string): boolean {
-  return ENDPOINTS_PUBLICOS.includes(rutaDe(endpoint))
+  const ruta = rutaDe(endpoint)
+  if (ENDPOINTS_PUBLICOS.includes(ruta)) return true
+  // Ruta pública para confirmación de cobro desde pasarela Recurrente (sin sesión de usuario)
+  if (/^\/pagos\/checkout\/[^/]+\/confirmar$/.test(ruta)) return true
+  return false
 }
 
 function el401EsDeNegocio(endpoint: string): boolean {
@@ -134,7 +143,12 @@ async function ejecutar(
   return fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+/**
+ * Ejecuta la petición con token, refresco ante 401 y manejo de error, y
+ * devuelve la Response cruda. Lo usan tanto `request` (JSON) como
+ * `solicitarBlob` (PDF), para que ninguna ruta se salte el refresco de sesión.
+ */
+async function ejecutarConAuth(endpoint: string, options: RequestInit = {}): Promise<Response> {
   const esPublico = esEndpointPublico(endpoint)
   // Un 401 de negocio se propaga como error normal, sin refrescar ni redirigir
   const trata401ComoSesion = !esPublico && !el401EsDeNegocio(endpoint)
@@ -181,12 +195,30 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     throw new ApiError(errorMessage, response.status)
   }
 
+  return response
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await ejecutarConAuth(endpoint, options)
+
   // Para respuestas vacías o 204 No Content
   if (response.status === 204) {
     return {} as T
   }
 
   return response.json()
+}
+
+/**
+ * Descarga una respuesta binaria (PDF) pasando por la misma capa de auth.
+ * No se puede abrir la URL directa en una pestaña nueva: el endpoint exige
+ * `Authorization: Bearer`, y una navegación del navegador no envía esa cabecera.
+ */
+async function solicitarBlob(endpoint: string): Promise<Blob> {
+  const response = await ejecutarConAuth(endpoint, {
+    headers: { Accept: 'application/pdf' },
+  })
+  return response.blob()
 }
 
 export const api = {
@@ -449,6 +481,10 @@ export const api = {
 
     getTicketById: (id: number) => request<TicketBackend>(`/tickets/${id}`),
 
+    // El backend arma el pase en PDF (Content-Disposition: inline) para
+    // previsualizar, imprimir o descargar desde el visor del navegador.
+    getPdf: (id: number) => solicitarBlob(`/tickets/${id}/pdf`),
+
     anular: (id: number) =>
       request<TicketBackend>(`/tickets/${id}`, {
         method: 'DELETE',
@@ -462,7 +498,42 @@ export const api = {
       }),
   },
 
-  // 9. Tarifas (módulo EmisionTickets)
+  // 9. Guías (módulo EmisionTickets)
+  // Sin alta propia: el guía nuevo se crea dentro de POST /tickets/emitir.
+  guias: {
+    listar: (params?: { buscar?: string; incluirAnulados?: boolean }) => {
+      const queryParams = new URLSearchParams()
+      if (params?.buscar) queryParams.append('buscar', params.buscar)
+      if (params?.incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      const queryStr = queryParams.toString()
+      return request<GuiaBackend[]>(`/guias${queryStr ? `?${queryStr}` : ''}`)
+    },
+
+    getById: (id: number) => request<GuiaBackend>(`/guias/${id}`),
+
+    // numeroCarnet es obligatorio si tieneCarnet es true (400 si falta); al
+    // pasar tieneCarnet false el backend limpia el número.
+    actualizar: (
+      id: number,
+      data: { nombre?: string; tieneCarnet?: boolean; numeroCarnet?: string | null }
+    ) =>
+      request<GuiaBackend>(`/guias/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+
+    activar: (id: number) =>
+      request<GuiaBackend>(`/guias/${id}/activar`, {
+        method: 'PATCH',
+      }),
+
+    anular: (id: number) =>
+      request<GuiaBackend>(`/guias/${id}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  // 10. Tarifas (módulo EmisionTickets)
   // Editar un precio no sobrescribe la fila: cierra la vigencia actual y crea
   // una nueva, por eso los tickets ya vendidos conservan su precio original.
   tarifas: {
@@ -496,7 +567,7 @@ export const api = {
       }),
   },
 
-  // 10. Cajas (apertura, arqueo y cierre)
+  // 11. Cajas (apertura, arqueo y cierre)
   // Solo puede existir una caja abierta a la vez en todo el sistema.
   // Apertura y cierre son inmutables: solo se pueden anular.
   cajas: {
@@ -516,6 +587,22 @@ export const api = {
       return request<AperturaCajaBackend[]>(`/cajas${queryStr ? `?${queryStr}` : ''}`)
     },
 
+    // Historial de cierres. Vista de supervisión: exige Cajas/Editar, no Ver.
+    // En el backend la ruta va antes de /cajas/:id para que el parámetro
+    // numérico no capture "cierres".
+    getCierres: (params?: FiltrosCierres) => {
+      const queryParams = new URLSearchParams()
+      if (params?.idUsuario) queryParams.append('idUsuario', String(params.idUsuario))
+      if (params?.fechaInicio) queryParams.append('fechaInicio', params.fechaInicio)
+      if (params?.fechaFin) queryParams.append('fechaFin', params.fechaFin)
+      if (params?.soloAnulados) queryParams.append('soloAnulados', 'true')
+      if (params?.incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
+      const queryStr = queryParams.toString()
+      return request<RespuestaHistorialCierres>(`/cajas/cierres${queryStr ? `?${queryStr}` : ''}`)
+    },
+
     // Devuelve null si no hay ninguna caja abierta
     // El backend responde un envoltorio { hayCajaAbierta, caja }, nunca null
     // directo. Leerlo sin desenvolver da un objeto siempre truthy: se veía una
@@ -527,7 +614,9 @@ export const api = {
 
     getById: (id: number) => request<AperturaCajaBackend>(`/cajas/${id}`),
 
-    // Previsualiza el monto esperado sin cerrar la caja
+    // Previsualiza el monto esperado sin cerrar la caja.
+    // Exige Cajas/Editar: es supervisión, no lectura. Quien cuenta el efectivo
+    // no debe ver esta cifra antes de contar, o el arqueo pierde sentido.
     getArqueo: (id: number) => request<ArqueoCaja>(`/cajas/${id}/arqueo`),
 
     cerrar: (id: number, data: { montoContado: number; observaciones?: string }) =>
@@ -536,6 +625,9 @@ export const api = {
         body: JSON.stringify(data),
       }),
 
+    // Exige Cajas/Editar: es supervisión. Si el cajero pudiera anular su propio
+    // cierre, cerraría, vería la diferencia, anularía y volvería a cerrar
+    // cuadrado. Un cierre anulado no se reactiva: se emite uno nuevo.
     anularCierre: (id: number) =>
       request<AperturaCajaBackend>(`/cajas/${id}/cierre/anular`, {
         method: 'PATCH',
@@ -547,7 +639,7 @@ export const api = {
       }),
   },
 
-  // 11. Gastos (sub-módulo de Cajas)
+  // 12. Gastos (sub-módulo de Cajas)
   // Se asocian automáticamente a la caja abierta actual; solo se pueden tocar
   // mientras esa caja siga abierta.
   gastos: {
@@ -579,7 +671,7 @@ export const api = {
       }),
   },
 
-  // 12. Tipos de Gasto (catálogo del sub-módulo Gastos)
+  // 13. Tipos de Gasto (catálogo del sub-módulo Gastos)
   tiposGasto: {
     listar: (incluirAnulados: boolean = false) =>
       request<TipoGastoBackend[]>(`/tipos-gasto${incluirAnulados ? '?incluirAnulados=true' : ''}`),
@@ -607,5 +699,19 @@ export const api = {
       request<TipoGastoBackend>(`/tipos-gasto/${id}`, {
         method: 'DELETE',
       }),
+  },
+
+  // 14. Pasarela de Pagos (Recurrente / Tarjeta)
+  pagos: {
+    // Confirmación pública invocada por la página de éxito tras el checkout de Recurrente.
+    // Consulta a Recurrente y marca el cobro como PAGADO si status === "paid".
+    confirmar: (idCheckout: string) =>
+      request<RespuestaConfirmacionPago>(`/pagos/checkout/${idCheckout}/confirmar`, {
+        method: 'POST',
+      }),
+
+    // Consulta interna del estado de cobro de un ticket y su link de checkout.
+    getPorTicket: (idTicket: number) =>
+      request<RespuestaPagoTicket>(`/pagos/ticket/${idTicket}`),
   },
 }
