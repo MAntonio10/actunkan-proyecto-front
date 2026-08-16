@@ -12,7 +12,7 @@ export default function DonacionesPage() {
 
         <main className="flex-1 container mx-auto px-4 py-6 md:py-8">
           {/* Encabezado del Módulo */}
-          <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
+          <div className="mb-6">
             <div className="titulo-seccion">
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
                 Módulo de Donaciones
@@ -21,10 +21,6 @@ export default function DonacionesPage() {
                 Gestión de donativos voluntarios y emisión de recibos oficiales
               </p>
             </div>
-            <span className="chip-acento">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Recepción de Donaciones Activa
-            </span>
           </div>
 
           {/* Componente del Módulo de Donaciones */}

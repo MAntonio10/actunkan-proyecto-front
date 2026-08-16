@@ -5,36 +5,44 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { type TicketBackend } from '@/tipos'
 
+interface DocumentoPdf {
+  id: number
+  /** Folio, usado como nombre de archivo si hay que descargar. */
+  folio: string
+  obtener: (id: number) => Promise<Blob>
+}
+
 /**
- * Abre el PDF del pase (GET /tickets/:id/pdf) en una pestaña nueva.
+ * Abre en una pestaña nueva el PDF de un documento (pase de acceso o recibo de
+ * donación).
  *
  * No se navega a la URL directamente porque el endpoint exige
  * `Authorization: Bearer` y una navegación del navegador no envía esa cabecera:
  * se descarga como blob a través de la capa de API y se abre el object URL.
  */
-export function usePdfTicket() {
+export function usePdfDocumento() {
   const [pdfEnCursoId, setPdfEnCursoId] = useState<number | null>(null)
 
   const abrirPdf = useCallback(
-    async (ticket: Pick<TicketBackend, 'id' | 'numeroTicket'>) => {
+    async ({ id, folio, obtener }: DocumentoPdf) => {
       if (pdfEnCursoId !== null) return
-      setPdfEnCursoId(ticket.id)
+      setPdfEnCursoId(id)
 
       // La pestaña se abre de forma síncrona con el clic: hacerlo después del
       // await la bloquearía el navegador por tratarse de un popup sin gesto.
       const ventana = window.open('', '_blank')
 
       try {
-        const blob = await api.tickets.getPdf(ticket.id)
+        const blob = await obtener(id)
         const url = URL.createObjectURL(blob)
 
         if (ventana) {
           ventana.location.href = url
         } else {
-          // Popup bloqueado: se descarga para no dejar al usuario sin el pase
+          // Popup bloqueado: se descarga para no dejar al usuario sin el documento
           const enlace = document.createElement('a')
           enlace.href = url
-          enlace.download = `${ticket.numeroTicket}.pdf`
+          enlace.download = `${folio}.pdf`
           enlace.click()
           toast.info('El navegador bloqueó la pestaña', {
             description: 'El PDF se descargó en su lugar.',
@@ -55,4 +63,21 @@ export function usePdfTicket() {
   )
 
   return { abrirPdf, pdfEnCursoId }
+}
+
+/** Envoltorio para pases de acceso, que conserva la firma anterior. */
+export function usePdfTicket() {
+  const { abrirPdf, pdfEnCursoId } = usePdfDocumento()
+
+  const abrirPdfTicket = useCallback(
+    (ticket: Pick<TicketBackend, 'id' | 'numeroTicket'>) =>
+      abrirPdf({
+        id: ticket.id,
+        folio: ticket.numeroTicket,
+        obtener: api.tickets.getPdf,
+      }),
+    [abrirPdf],
+  )
+
+  return { abrirPdf: abrirPdfTicket, pdfEnCursoId }
 }

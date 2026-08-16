@@ -31,11 +31,14 @@ import {
   RefreshCw,
   EyeOff,
   ClipboardCheck,
+  HandHeart,
+  TrendingDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
 import { HistorialCierresCaja } from '@/componentes/historial_cierres_caja'
+import { HistorialAperturasCaja } from '@/componentes/historial_aperturas_caja'
 import { cn } from '@/lib/utils'
 import {
   type AperturaCajaBackend,
@@ -77,7 +80,7 @@ export default function CierreDiarioPage() {
   const [arqueo, setArqueo] = useState<ArqueoCaja | null>(null)
   const [cargando, setCargando] = useState(true)
   const [pestana, setPestana] = useState('caja')
-  // Se incrementa al cerrar una caja, para que el historial de cierres lo vea
+  // Se incrementa al abrir, cerrar o reabrir: refresca aperturas y cierres
   const [refrescarCierres, setRefrescarCierres] = useState(0)
 
   // Apertura
@@ -130,6 +133,7 @@ export default function CierreDiarioPage() {
       setDialogoApertura(false)
       setMontoInicial('')
       setObservacionesApertura('')
+      setRefrescarCierres((n) => n + 1)
       await cargarTodo()
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : 'No se pudo abrir la caja'
@@ -234,22 +238,33 @@ export default function CierreDiarioPage() {
             </div>
           ) : (
             <>
-              {puedeSupervisar && (
-                <div className="mb-4">
-                  <Tabs value={pestana} onValueChange={setPestana}>
-                    <TabsList className="grid w-full bg-muted/60 p-1 gap-1 grid-cols-2 sm:w-[320px]">
-                      <TabsTrigger value="caja" className="gap-2 font-semibold cursor-pointer">
-                        <Calculator className="h-4 w-4 text-primary" />
-                        Arqueo
-                      </TabsTrigger>
+              {/* El historial de aperturas solo exige Cajas/Ver; el de cierres
+                  es supervisión (Cajas/Editar). */}
+              <div className="mb-4">
+                <Tabs value={pestana} onValueChange={setPestana}>
+                  <TabsList
+                    className={cn(
+                      'grid w-full bg-muted/60 p-1 gap-1',
+                      puedeSupervisar ? 'grid-cols-3 sm:w-[460px]' : 'grid-cols-2 sm:w-[320px]',
+                    )}
+                  >
+                    <TabsTrigger value="caja" className="gap-2 font-semibold cursor-pointer">
+                      <Calculator className="h-4 w-4 text-primary" />
+                      Arqueo
+                    </TabsTrigger>
+                    <TabsTrigger value="aperturas" className="gap-2 font-semibold cursor-pointer">
+                      <LockOpen className="h-4 w-4 text-primary" />
+                      Aperturas
+                    </TabsTrigger>
+                    {puedeSupervisar && (
                       <TabsTrigger value="cierres" className="gap-2 font-semibold cursor-pointer">
                         <ClipboardCheck className="h-4 w-4 text-primary" />
                         Cierres
                       </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-              )}
+                    )}
+                  </TabsList>
+                </Tabs>
+              </div>
 
               {pestana === 'caja' && !cajaActual && (
                 <Card className="bg-card/80 backdrop-blur-sm border-amber-500/40">
@@ -360,6 +375,40 @@ export default function CierreDiarioPage() {
                           </CardContent>
                         </Card>
 
+                        {/* Las donaciones son efectivo del mismo cajón: suman
+                            al arqueo, si no saldrían como sobrante al cerrar. */}
+                        {arqueo?.totalDonaciones !== undefined && (
+                          <Card className="bg-blue-500/10 border-blue-500/30">
+                            <CardContent className="pt-6">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Donaciones</p>
+                                  <p className="text-2xl font-bold text-blue-600">
+                                    {moneda(arqueo.totalDonaciones)}
+                                  </p>
+                                </div>
+                                <HandHeart className="h-7 w-7 text-blue-500/60" />
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
+                        {arqueo?.totalGastos !== undefined && (
+                          <Card className="bg-destructive/10 border-destructive/30">
+                            <CardContent className="pt-6">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <p className="text-sm text-muted-foreground">Gastos</p>
+                                  <p className="text-2xl font-bold text-destructive">
+                                    −{moneda(arqueo.totalGastos)}
+                                  </p>
+                                </div>
+                                <TrendingDown className="h-7 w-7 text-destructive/60" />
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )}
+
                         <Card className="bg-primary/10 border-primary/30">
                           <CardContent className="pt-6">
                             <div className="flex items-start justify-between">
@@ -382,13 +431,24 @@ export default function CierreDiarioPage() {
                       <CardHeader className="pb-2">
                         <CardTitle className="text-base">Cómo se calcula el arqueo</CardTitle>
                         <CardDescription>
-                          El servidor calcula el monto esperado sumando el fondo inicial y las ventas en efectivo; al cerrar se compara contra lo contado físicamente.
+                          El servidor calcula el monto esperado; al cerrar se compara contra lo
+                          contado físicamente.
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
+                        {/* La fórmula se arma con los términos que el servidor
+                            devuelve, para que no quede desfasada si el arqueo
+                            cambia de componentes. */}
                         <p className="text-sm text-muted-foreground font-mono bg-muted/40 rounded-lg p-3">
                           {moneda(arqueo?.montoInicial)} (fondo) + {moneda(arqueo?.ventasEfectivo)}{' '}
-                          (ventas efectivo) ={' '}
+                          (ventas efectivo)
+                          {arqueo?.totalDonaciones !== undefined && (
+                            <> + {moneda(arqueo.totalDonaciones)} (donaciones)</>
+                          )}
+                          {arqueo?.totalGastos !== undefined && (
+                            <> − {moneda(arqueo.totalGastos)} (gastos)</>
+                          )}{' '}
+                          ={' '}
                           <span className="text-foreground font-bold">
                             {moneda(arqueo?.montoEsperado)}
                           </span>
@@ -400,6 +460,13 @@ export default function CierreDiarioPage() {
                     </Card>
                   )}
                 </div>
+              )}
+
+              {pestana === 'aperturas' && (
+                <HistorialAperturasCaja
+                  refrescarToken={refrescarCierres}
+                  onCambio={cargarTodo}
+                />
               )}
 
               {pestana === 'cierres' && puedeSupervisar && (

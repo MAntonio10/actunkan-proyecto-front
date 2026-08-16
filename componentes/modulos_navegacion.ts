@@ -58,6 +58,15 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     iconoDesktop: Calculator,
     ruta: '/cierre-diario',
   },
+  Donaciones: {
+    id: 'donaciones',
+    nombre: 'Donativos',
+    nombreLargo: 'Donaciones',
+    descripcion: 'Recibos de donación en efectivo',
+    icono: HandHeart,
+    iconoDesktop: HandHeart,
+    ruta: '/donaciones',
+  },
   Bitacora: {
     id: 'bitacora',
     nombre: 'Bitácora',
@@ -92,15 +101,6 @@ export const MODULOS_SIN_BACKEND: ItemModulo[] = [
     icono: ClipboardList,
     iconoDesktop: ClipboardList,
     ruta: '/actividades',
-  },
-  {
-    id: 'donaciones',
-    nombre: 'Donativos',
-    nombreLargo: 'Donaciones',
-    descripcion: 'Gestión de donativos y recibos',
-    icono: HandHeart,
-    iconoDesktop: HandHeart,
-    ruta: '/donaciones',
   },
   {
     id: 'sincronizacion',

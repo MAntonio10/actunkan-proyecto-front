@@ -28,6 +28,9 @@ import {
   RespuestaHistorialCierres,
   GastoBackend,
   TipoGastoBackend,
+  DonacionBackend,
+  FiltrosDonaciones,
+  RespuestaHistorialDonaciones,
   RespuestaConfirmacionPago,
   RespuestaPagoTicket,
 } from '@/tipos'
@@ -713,5 +716,46 @@ export const api = {
     // Consulta interna del estado de cobro de un ticket y su link de checkout.
     getPorTicket: (idTicket: number) =>
       request<RespuestaPagoTicket>(`/pagos/ticket/${idTicket}`),
+  },
+
+  // 15. Donaciones
+  // Solo efectivo y exigen caja abierta: el dinero entra al mismo cajón que las
+  // ventas, así que suma al arqueo. El recibo no se edita, solo se anula.
+  donaciones: {
+    // Solo `monto` es obligatorio; sin nombre sale como "Donante anónimo".
+    crear: (data: { monto: number; nombreDonante?: string; observaciones?: string }) =>
+      request<DonacionBackend>('/donaciones', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    listar: (params?: FiltrosDonaciones) => {
+      const queryParams = new URLSearchParams()
+      if (params?.buscar) queryParams.append('buscar', params.buscar)
+      if (params?.idUsuario) queryParams.append('idUsuario', String(params.idUsuario))
+      if (params?.idAperturaCaja)
+        queryParams.append('idAperturaCaja', String(params.idAperturaCaja))
+      if (params?.fechaInicio) queryParams.append('fechaInicio', params.fechaInicio)
+      if (params?.fechaFin) queryParams.append('fechaFin', params.fechaFin)
+      if (params?.incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
+      const queryStr = queryParams.toString()
+      return request<RespuestaHistorialDonaciones>(
+        `/donaciones${queryStr ? `?${queryStr}` : ''}`,
+      )
+    },
+
+    getById: (id: number) => request<DonacionBackend>(`/donaciones/${id}`),
+
+    // Recibo no contable, 80 mm, sin QR. Anulado sale en rojo con sello.
+    getPdf: (id: number) => solicitarBlob(`/donaciones/${id}/pdf`),
+
+    // Falla con 400 si ya estaba anulado o si la caja de origen ya se cerró.
+    anular: (id: number, motivo?: string) =>
+      request<DonacionBackend>(`/donaciones/${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify(motivo ? { motivo } : {}),
+      }),
   },
 }

@@ -121,7 +121,7 @@ export default function AutenticacionPage() {
       toast.success("¡Bienvenido al Sistema!", {
         description: `Sesión iniciada como ${usuarioLogueado.nombre}`,
       });
-      router.push("/usuarios");
+      router.push("/registro-visitantes");
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : "Error al iniciar sesión";
       toast.error("Credenciales inválidas", {

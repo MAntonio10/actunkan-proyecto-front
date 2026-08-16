@@ -1207,12 +1207,61 @@ export interface RespuestaCajaActual {
 
 // Los importes pueden llegar como número o como cadena Decimal ("1600.0000"),
 // según cómo serialice cada endpoint: conviértalos antes de operar con ellos.
+// montoEsperado = montoInicial + ventasEfectivo + totalDonaciones − totalGastos
 export interface ArqueoCaja {
   idApertura: number
   montoInicial: number | string
   ventasEfectivo: number | string
+  totalDonaciones?: number | string
   totalGastos: number | string
   montoEsperado: number | string
+}
+
+// ==========================================
+// Donaciones (módulo Donaciones)
+// ==========================================
+
+// Solo se aceptan en efectivo y suman al arqueo de la caja abierta. El recibo
+// no se edita, solo se anula: por eso el módulo no usa la acción 'Editar'.
+export interface DonacionBackend {
+  id: number
+  numeroRecibo: string
+  idAperturaCaja: number
+  idUsuario: number
+  /** Sin nombre, el recibo sale a nombre de "Donante anónimo". */
+  nombreDonante?: string | null
+  monto: string
+  observaciones?: string | null
+  anulado: boolean
+  motivoAnulacion?: string | null
+  fechaCreacion: string
+  fechaActualizacion?: string
+  usuario?: { id: number; nombre: string; correo?: string }
+  aperturaCaja?: { id: number; fechaCreacion?: string }
+}
+
+export interface MetricasDonaciones {
+  totalRecibos: number
+  montoRecaudado: string
+}
+
+export interface RespuestaHistorialDonaciones {
+  datos: DonacionBackend[]
+  total: number
+  pagina: number
+  limite: number
+  metricas: MetricasDonaciones
+}
+
+export interface FiltrosDonaciones {
+  buscar?: string
+  idUsuario?: number
+  idAperturaCaja?: number
+  fechaInicio?: string
+  fechaFin?: string
+  incluirAnulados?: boolean
+  pagina?: number
+  limite?: number
 }
 
 export interface RespuestaCierreCaja {

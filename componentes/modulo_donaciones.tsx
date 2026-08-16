@@ -1,21 +1,20 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { LogosInstitucionales } from "./logos_institucionales";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Heart,
-  PlusCircle,
-  History,
+  HandHeart,
   Banknote,
-  CreditCard,
-  Printer,
   Search,
-  CheckCircle2,
-  Receipt,
-  Sparkles,
   FileText,
-  DollarSign,
-  TrendingUp,
+  Ban,
+  History,
+  Plus,
+  Users,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,8 +22,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Spinner } from "@/components/ui/spinner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -33,543 +34,692 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { useAutenticacion } from "@/contexto/contexto_autenticacion";
+import { usePdfDocumento } from "@/hooks/use_pdf_ticket";
+import {
+  type DonacionBackend,
+  type MetricasDonaciones,
+  type AperturaCajaBackend,
+} from "@/tipos";
 
-import { DONACIONES_DEMO, type Donacion, type MetodoPago } from "@/tipos";
-import { CodigoQR } from "@/componentes/codigo_qr";
+const LIMITE = 50;
+
+function aNumero(valor: string | number | undefined | null): number {
+  const n = typeof valor === "string" ? parseFloat(valor) : valor;
+  return typeof n === "number" && !isNaN(n) ? n : 0;
+}
+
+function moneda(valor: string | number | undefined): string {
+  return `Q${aNumero(valor).toFixed(2)}`;
+}
+
+function formatearFechaHora(valor?: string): string {
+  if (!valor) return "—";
+  const fecha = new Date(valor);
+  if (isNaN(fecha.getTime())) return "—";
+  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+}
 
 export function ModuloDonaciones() {
-  const [donaciones, setDonaciones] = useState<Donacion[]>(DONACIONES_DEMO);
-  const [pestanaActiva, setPestanaActiva] = useState<string>("emision");
+  const { puedeAccion } = useAutenticacion();
+  const puedeCrear = puedeAccion("Donaciones", "Crear");
+  const puedeAnular = puedeAccion("Donaciones", "Anular");
+  const { abrirPdf, pdfEnCursoId } = usePdfDocumento();
 
-  // Campos del formulario
-  const [nombreDonante, setNombreDonante] = useState<string>("");
-  const [montoInput, setMontoInput] = useState<string>("");
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>("efectivo");
-  const [notasInput, setNotasInput] = useState<string>("");
+  const [pestana, setPestana] = useState("registro");
 
-  // Búsqueda en historial
-  const [busqueda, setBusqueda] = useState<string>("");
+  // Registrar: solo el monto es obligatorio
+  const [nombreDonante, setNombreDonante] = useState("");
+  const [monto, setMonto] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const [registrando, setRegistrando] = useState(false);
+  const [ultimoRecibo, setUltimoRecibo] = useState<DonacionBackend | null>(null);
 
-  // Recibo activo generado
-  const [reciboGenerado, setReciboGenerado] = useState<Donacion | null>(null);
+  // Caja: registrar exige una abierta, el backend responde 400 sin ella
+  const [cajaActual, setCajaActual] = useState<AperturaCajaBackend | null>(null);
+  const [cargandoCaja, setCargandoCaja] = useState(true);
 
-  // Cálculo del monto numérico para el preview reactivo
-  const montoNumerico = useMemo(() => {
-    const val = parseFloat(montoInput.replace(/^0+(?=\d)/, ""));
-    return isNaN(val) || val <= 0 ? 0 : val;
-  }, [montoInput]);
+  // Historial
+  const [donaciones, setDonaciones] = useState<DonacionBackend[]>([]);
+  const [metricas, setMetricas] = useState<MetricasDonaciones | null>(null);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [cargandoLista, setCargandoLista] = useState(true);
+  const [busqueda, setBusqueda] = useState("");
+  const [busquedaAplicada, setBusquedaAplicada] = useState("");
 
-  // Totales financieros
-  const estadisticas = useMemo(() => {
-    const totalRecaudado = donaciones.reduce((acc, d) => acc + d.monto, 0);
-    const cantidadDonaciones = donaciones.length;
-    const promedio = cantidadDonaciones > 0 ? totalRecaudado / cantidadDonaciones : 0;
-    return { totalRecaudado, cantidadDonaciones, promedio };
-  }, [donaciones]);
+  const [aAnular, setAAnular] = useState<DonacionBackend | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  const [anulandoId, setAnulandoId] = useState<number | null>(null);
 
-  // Donaciones filtradas en la tabla
-  const donacionesFiltradas = useMemo(() => {
-    if (!busqueda.trim()) return donaciones;
-    const q = busqueda.toLowerCase().trim();
-    return donaciones.filter(
-      (d) =>
-        d.nombre_donante.toLowerCase().includes(q) ||
-        d.numero_recibo.toLowerCase().includes(q)
-    );
-  }, [donaciones, busqueda]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setBusquedaAplicada(busqueda);
+      setPagina(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [busqueda]);
 
-  const handleEmitirDonacion = (e: React.FormEvent) => {
-    e.preventDefault();
+  const cargarCaja = useCallback(async () => {
+    setCargandoCaja(true);
+    try {
+      setCajaActual(await api.cajas.getActual());
+    } catch {
+      setCajaActual(null);
+    } finally {
+      setCargandoCaja(false);
+    }
+  }, []);
 
-    if (!nombreDonante.trim()) {
-      toast.error("Nombre requerido", {
-        description: "Por favor ingrese el nombre de la persona o entidad que realiza la donación.",
+  const cargarDonaciones = useCallback(async () => {
+    setCargandoLista(true);
+    try {
+      const res = await api.donaciones.listar({
+        buscar: busquedaAplicada || undefined,
+        incluirAnulados: true,
+        pagina,
+        limite: LIMITE,
       });
+      setDonaciones(Array.isArray(res.datos) ? res.datos : []);
+      setTotal(res.total || 0);
+      setMetricas(res.metricas || null);
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
+      toast.error("Error al cargar donaciones", { description: mensaje });
+      setDonaciones([]);
+      setTotal(0);
+      setMetricas(null);
+    } finally {
+      setCargandoLista(false);
+    }
+  }, [busquedaAplicada, pagina]);
+
+  useEffect(() => {
+    cargarCaja();
+  }, [cargarCaja]);
+
+  useEffect(() => {
+    cargarDonaciones();
+  }, [cargarDonaciones]);
+
+  const registrar = async () => {
+    if (registrando) return;
+    const montoNum = parseFloat(monto);
+    if (isNaN(montoNum) || montoNum <= 0) {
+      toast.error("Monto no válido", { description: "Debe ser mayor a Q0.00." });
       return;
     }
 
-    if (montoNumerico <= 0) {
-      toast.error("Monto no válido", {
-        description: "El monto a donar debe ser mayor a Q0.00.",
+    setRegistrando(true);
+    try {
+      const recibo = await api.donaciones.crear({
+        monto: montoNum,
+        nombreDonante: nombreDonante.trim() || undefined,
+        observaciones: observaciones.trim() || undefined,
       });
-      return;
+      setUltimoRecibo(recibo);
+      toast.success("Donación registrada", {
+        description: `${recibo.numeroRecibo} · ${moneda(recibo.monto)}`,
+      });
+      setNombreDonante("");
+      setMonto("");
+      setObservaciones("");
+      await Promise.all([cargarDonaciones(), cargarCaja()]);
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudo registrar la donación";
+      toast.error("Error al registrar", { description: mensaje });
+    } finally {
+      setRegistrando(false);
     }
-
-    const nuevoReciboNo = `DON-2026-${String(donaciones.length + 1).padStart(3, "0")}`;
-    const nuevaDonacion: Donacion = {
-      id: `don-${Date.now()}`,
-      numero_recibo: nuevoReciboNo,
-      nombre_donante: nombreDonante.trim(),
-      monto: montoNumerico,
-      metodo_pago: metodoPago,
-      fecha: new Date(),
-      notas: notasInput.trim() || undefined,
-    };
-
-    setDonaciones((prev) => [nuevaDonacion, ...prev]);
-    setReciboGenerado(nuevaDonacion);
-
-    toast.success("Donación registrada y recibo emitido", {
-      description: `${nuevaDonacion.numero_recibo} · ${nuevaDonacion.nombre_donante} · Q${nuevaDonacion.monto.toFixed(2)}`,
-    });
   };
 
-  const handleLimpiarFormulario = () => {
-    setNombreDonante("");
-    setMontoInput("");
-    setMetodoPago("efectivo");
-    setNotasInput("");
-    setReciboGenerado(null);
-  };
+  const anular = useCallback(async () => {
+    if (!aAnular || anulandoId !== null) return;
+    setAnulandoId(aAnular.id);
+    try {
+      await api.donaciones.anular(aAnular.id, motivoAnulacion.trim() || undefined);
+      toast.success("Recibo anulado", {
+        description: "Deja de contar en el arqueo de caja.",
+      });
+      setAAnular(null);
+      setMotivoAnulacion("");
+      await cargarDonaciones();
+    } catch (err: unknown) {
+      const mensaje = err instanceof Error ? err.message : "No se pudo anular el recibo";
+      // 400 si ya estaba anulado o si la caja de origen ya se cerró
+      toast.error("No se pudo anular", { description: mensaje });
+    } finally {
+      setAnulandoId(null);
+    }
+  }, [aAnular, anulandoId, motivoAnulacion, cargarDonaciones]);
+
+  const verPdf = (d: DonacionBackend) =>
+    abrirPdf({ id: d.id, folio: d.numeroRecibo, obtener: api.donaciones.getPdf });
+
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE));
 
   return (
     <div className="space-y-6">
-      {/* Tarjetas de Métricas de Donación */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <Heart className="h-6 w-6" />
+              <Users className="h-6 w-6" />
             </div>
             <div>
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Total Recaudado por Mes
+                Recibos emitidos
               </p>
-              <p className="text-2xl font-bold text-primary">
-                Q{estadisticas.totalRecaudado.toFixed(2)}
-              </p>
+              <p className="text-2xl font-bold text-primary">{metricas?.totalRecibos ?? "—"}</p>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-emerald-500/10 border-emerald-500/30">
           <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-blue-500/15 text-blue-500 flex items-center justify-center shrink-0">
-              <Receipt className="h-6 w-6" />
+            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0">
+              <Banknote className="h-6 w-6" />
             </div>
             <div>
               <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Donaciones Emitidas por Mes
+                Monto recaudado
               </p>
-              <p className="text-2xl font-bold text-foreground">
-                {estadisticas.cantidadDonaciones}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
-              <TrendingUp className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Promedio por Donativo
-              </p>
-              <p className="text-2xl font-bold text-foreground">
-                Q{estadisticas.promedio.toFixed(2)}
+              <p className="text-2xl font-bold text-emerald-600">
+                {metricas ? moneda(metricas.montoRecaudado) : "—"}
               </p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Pestañas Principales: Emisión vs Registro */}
-      <Tabs defaultValue="emision" value={pestanaActiva} onValueChange={setPestanaActiva} className="w-full space-y-6">
-        <TabsList className="grid w-full grid-cols-2 max-w-md mx-auto">
-          <TabsTrigger value="emision" className="text-xs md:text-sm gap-2">
-            <PlusCircle className="h-4 w-4" />
-            Emitir Recibo
-          </TabsTrigger>
-          <TabsTrigger value="registro" className="text-xs md:text-sm gap-2">
-            <History className="h-4 w-4" />
-            Registro de Donaciones ({donaciones.length})
+      <Tabs value={pestana} onValueChange={setPestana}>
+        <TabsList className="grid grid-cols-2 w-full sm:w-[340px] bg-muted/60 p-1 gap-1">
+          {puedeCrear && (
+            <TabsTrigger value="registro" className="gap-2 font-semibold cursor-pointer">
+              <Plus className="h-4 w-4 text-primary" />
+              Registrar
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="historial" className="gap-2 font-semibold cursor-pointer">
+            <History className="h-4 w-4 text-primary" />
+            Recibos
           </TabsTrigger>
         </TabsList>
+      </Tabs>
 
-        {/* Pestaña 1: Emisión de Recibo */}
-        <TabsContent value="emision" className="m-0">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Formulario de donación (3 columnas) */}
-            <Card className="lg:col-span-3 bg-card/80 backdrop-blur-sm border-border/50">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Heart className="h-5 w-5 text-primary" />
-                  Emisión de Recibo de Donación
-                </CardTitle>
-                <CardDescription>
-                  Registre el donativo otorgado al Parque Regional Municipal Actún Kan y emita su recibo de comprobación.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleEmitirDonacion} className="space-y-5">
-                  {/* Nombre del donante */}
-                  <div className="space-y-2">
-                    <Label htmlFor="nombre_donante" className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                      Nombre de la Persona / Entidad Donante
-                    </Label>
-                    <Input
-                      id="nombre_donante"
-                      placeholder="Ej. Carlos Mendoza o Fundación Petén Verde"
-                      value={nombreDonante}
-                      onChange={(e) => setNombreDonante(e.target.value)}
-                      className="bg-muted/50 border-border/50 h-11"
-                    />
+      {pestana === "registro" && puedeCrear && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <Card className="lg:col-span-3 bg-card/80 backdrop-blur-sm border-border/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <HandHeart className="h-5 w-5 text-primary" />
+                Registrar donación
+              </CardTitle>
+              <CardDescription>
+                Solo se aceptan donaciones en efectivo. Se entrega un recibo no contable.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {/* Registrar exige caja abierta: el efectivo entra al mismo cajón
+                  que las ventas y suma al arqueo. */}
+              {!cargandoCaja && !cajaActual && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex items-start gap-2">
+                  <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-foreground">No hay caja abierta</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      La donación es efectivo que suma al arqueo, así que necesita una caja
+                      abierta. Ábrala desde el módulo Caja y Cierre.
+                    </p>
                   </div>
+                </div>
+              )}
 
-                  {/* Monto a donar */}
-                  <div className="space-y-2">
-                    <Label htmlFor="monto_donativo" className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                      Monto a Donar (Quetzales)
-                    </Label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-primary text-base">
-                        Q
-                      </span>
-                      <Input
-                        id="monto_donativo"
-                        type="number"
-                        min={1}
-                        step={1}
-                        placeholder="Ej. 100.00"
-                        value={montoInput}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/^0+(?=\d)/, "");
-                          setMontoInput(val);
-                        }}
-                        className="bg-muted/50 border-border/50 h-11 pl-9 font-bold text-lg text-foreground"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Forma de Pago */}
-                  <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                      Forma de Pago
-                    </Label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setMetodoPago("efectivo")}
-                        className={`h-11 justify-center gap-2 border-2 cursor-pointer transition-colors ${
-                          metodoPago === "efectivo"
-                            ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                            : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                        }`}
-                      >
-                        <Banknote className="h-4 w-4 text-emerald-500" />
-                        <span>Efectivo</span>
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setMetodoPago("tarjeta")}
-                        className={`h-11 justify-center gap-2 border-2 cursor-pointer transition-colors ${
-                          metodoPago === "tarjeta"
-                            ? "border-primary bg-primary/10 text-primary font-semibold shadow-sm hover:bg-primary/10 hover:text-primary hover:border-primary"
-                            : "border-border/60 bg-background text-muted-foreground hover:border-primary/80 hover:bg-background hover:text-muted-foreground"
-                        }`}
-                      >
-                        <CreditCard className="h-4 w-4 text-blue-500" />
-                        <span>Tarjeta</span>
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Notas opcionales */}
-                  <div className="space-y-2">
-                    <Label htmlFor="notas_donacion" className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                      Notas / Propósito del Donativo (Opcional)
-                    </Label>
-                    <Textarea
-                      id="notas_donacion"
-                      placeholder="Ej. Apoyo para conservación de flora, reforestación, mantenimientos, etc."
-                      value={notasInput}
-                      onChange={(e) => setNotasInput(e.target.value)}
-                      className="bg-muted/50 border-border/50 min-h-[75px] resize-none"
-                    />
-                  </div>
-
-                  <Separator />
-
-                  {/* Botones de acción */}
-                  <div className="flex gap-3">
-                    <Button
-                      type="submit"
-                      className="flex-1 h-12 text-base font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
-                    >
-                      <Receipt className="mr-2 h-5 w-5" />
-                      Emitir Recibo de Donación
-                    </Button>
-                    {reciboGenerado && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleLimpiarFormulario}
-                        className="h-12 border-border/60 text-muted-foreground hover:text-foreground"
-                      >
-                        Nueva Donación
-                      </Button>
-                    )}
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
-
-            {/* Preview del Recibo de Donación (2 columnas) */}
-            <div className="lg:col-span-2">
-              <div className="lg:sticky lg:top-24 space-y-3">
-                <Card className="bg-card/90 backdrop-blur-sm border-2 border-primary/30 overflow-hidden shadow-lg">
-                  <CardContent className="p-0">
-                    {/* Header del recibo */}
-                    <div className="bg-gradient-to-br from-primary/15 via-primary/5 to-transparent p-5 text-center border-b border-dashed border-border/60">
-                      <LogosInstitucionales tamano="md" className="mb-2" />
-                      <h3 className="text-lg font-extrabold tracking-tight text-foreground">
-                        ACTÚN KAN
-                      </h3>
-                      <p className="text-[11px] font-bold uppercase tracking-widest text-primary">
-                        Recibo de Donación
-                      </p>
-                      <Badge variant="outline" className="mt-2 font-mono text-xs border-primary/40 text-primary bg-background">
-                        {reciboGenerado ? reciboGenerado.numero_recibo : `DON-2026-${String(donaciones.length + 1).padStart(3, "0")}`}
-                      </Badge>
-                    </div>
-
-                    <div className="p-5 space-y-4">
-                      {/* Nombre del donante */}
-                      <div className="rounded-lg bg-muted/40 p-3 border border-border/40 space-y-0.5">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
-                          Donante
-                        </span>
-                        <p className="text-lg font-bold text-foreground truncate">
-                          {nombreDonante.trim() || reciboGenerado?.nombre_donante || "Nombre del Donante"}
-                        </p>
-                      </div>
-
-                      {/* Monto donado */}
-                      <div className="flex items-baseline justify-between rounded-lg bg-primary/10 p-3.5 border-2 border-primary/30">
-                        <span className="text-xs uppercase font-bold tracking-wider text-primary">
-                          Monto Donado
-                        </span>
-                        <p className="text-3xl font-black text-primary tabular-nums">
-                          Q{(reciboGenerado ? reciboGenerado.monto : montoNumerico).toFixed(2)}
-                        </p>
-                      </div>
-
-                      {/* Forma de Pago - Destacada para impresoras térmicas de 80 mm */}
-                      <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-3 flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                          Forma de Pago
-                        </span>
-                        <span className="text-base font-black tracking-wide text-foreground uppercase flex items-center gap-2">
-                          {metodoPago === "efectivo" ? (
-                            <>
-                              <span>EFECTIVO</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>TARJETA</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-
-                      <div className="space-y-2 text-xs pt-1">
-                        <div className="flex justify-between items-center py-1 border-b border-border/40">
-                          <span className="text-muted-foreground font-medium">Fecha de Emisión:</span>
-                          <span className="font-semibold text-foreground">
-                            {(reciboGenerado ? reciboGenerado.fecha : new Date()).toISOString().split("T")[0]}
-                          </span>
-                        </div>
-                        {(notasInput.trim() || reciboGenerado?.notas) && (
-                          <div className="py-1">
-                            <span className="text-muted-foreground font-medium block mb-0.5">Notas:</span>
-                            <p className="text-xs text-foreground italic bg-muted/30 p-2 rounded border border-border/30">
-                              {notasInput.trim() || reciboGenerado?.notas}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Código QR de recibo */}
-                      <div className="flex flex-col items-center pt-2">
-                        <div className="bg-white p-3 rounded-lg border border-border/40 shadow-sm">
-                          <CodigoQR
-                            valor={JSON.stringify({
-                              recibo: reciboGenerado ? reciboGenerado.numero_recibo : `DON-2026-${String(donaciones.length + 1).padStart(3, "0")}`,
-                              donante: nombreDonante || reciboGenerado?.nombre_donante || "Donante",
-                              monto: reciboGenerado ? reciboGenerado.monto : montoNumerico,
-                              pago: metodoPago,
-                            })}
-                            size={160}
-                          />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground mt-2 font-medium text-center">
-                          ¡Muchas gracias por su apoyo a la conservación del Parque Regional Municipal Actún Kan!
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* Pestaña 2: Registro / Historial de Donaciones */}
-        <TabsContent value="registro" className="m-0">
-          <Card className="bg-card/80 backdrop-blur-sm border-border/50">
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <History className="h-5 w-5 text-primary" />
-                  Historial de Donaciones Registradas
-                </CardTitle>
-                <CardDescription>
-                  Registro completo de donativos y recibos emitidos en el sistema.
-                </CardDescription>
-              </div>
-
-              {/* Búsqueda */}
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <div className="space-y-1.5">
+                <Label htmlFor="monto-donacion">
+                  Monto (Q) <span className="text-destructive">*</span>
+                </Label>
                 <Input
-                  placeholder="Buscar donante o recibo..."
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                  className="pl-9 bg-muted/40 border-border/60 h-9 text-xs"
+                  id="monto-donacion"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  className="h-11 text-lg font-semibold"
                 />
               </div>
-            </CardHeader>
-            <CardContent>
-              {/* Vista Escritorio (Tabla) */}
-              <div className="hidden md:block rounded-md border border-border/50 overflow-hidden">
-                <Table>
-                  <TableHeader className="bg-muted/40">
-                    <TableRow>
-                      <TableHead className="w-[140px]">No. Recibo</TableHead>
-                      <TableHead>Donante</TableHead>
-                      <TableHead className="text-right">Monto (Q)</TableHead>
-                      <TableHead>Forma de Pago</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Notas</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {donacionesFiltradas.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                          No se encontraron donaciones registradas.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      donacionesFiltradas.map((d) => (
-                        <TableRow key={d.id} className="hover:bg-muted/20">
-                          <TableCell className="font-mono text-xs font-semibold text-primary">
-                            {d.numero_recibo}
-                          </TableCell>
-                          <TableCell className="font-medium text-foreground">
-                            {d.nombre_donante}
-                          </TableCell>
-                          <TableCell className="text-right font-bold text-foreground">
-                            Q{d.monto.toFixed(2)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`text-[11px] gap-1 font-semibold ${
-                                d.metodo_pago === "efectivo"
-                                  ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10"
-                                  : "border-blue-500/40 text-blue-600 bg-blue-500/10"
-                              }`}
-                            >
-                              {d.metodo_pago === "efectivo" ? (
-                                <>
-                                  <Banknote className="h-3 w-3" />
-                                  Efectivo
-                                </>
-                              ) : (
-                                <>
-                                  <CreditCard className="h-3 w-3" />
-                                  Tarjeta
-                                </>
-                              )}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {d.fecha.toISOString().split("T")[0]}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
-                            {d.notas || "-"}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="nombre-donante">Nombre del donante (opcional)</Label>
+                <Input
+                  id="nombre-donante"
+                  placeholder="Ej. Fundación Verde"
+                  value={nombreDonante}
+                  onChange={(e) => setNombreDonante(e.target.value)}
+                  className="h-11"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Si se deja vacío, el recibo sale a nombre de “Donante anónimo”.
+                </p>
               </div>
 
-              {/* Vista Móvil (Tarjetas) */}
-              <div className="grid grid-cols-1 gap-3 md:hidden">
-                {donacionesFiltradas.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg p-4 border border-border/50 text-sm">
-                    No se encontraron donaciones registradas.
-                  </div>
-                ) : (
-                  donacionesFiltradas.map((d) => (
-                    <div key={d.id} className="p-4 rounded-xl border border-border/60 bg-card/60 space-y-3 shadow-sm">
-                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                        <span className="font-mono text-xs font-bold text-primary">
-                          {d.numero_recibo}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {d.fecha.toISOString().split("T")[0]}
-                        </span>
-                      </div>
-
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold block">Donante</span>
-                          <h4 className="font-semibold text-sm text-foreground">{d.nombre_donante}</h4>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-extrabold text-base text-primary">
-                            Q{d.monto.toFixed(2)}
-                          </p>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] gap-1 font-semibold mt-1 ${
-                              d.metodo_pago === "efectivo"
-                                ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10"
-                                : "border-blue-500/40 text-blue-600 bg-blue-500/10"
-                            }`}
-                          >
-                            {d.metodo_pago === "efectivo" ? "Efectivo" : "Tarjeta"}
-                          </Badge>
-                        </div>
-                      </div>
-
-                      {d.notas && (
-                        <div className="pt-2 border-t border-border/30">
-                          <span className="text-[10px] text-muted-foreground font-medium block mb-0.5">Notas:</span>
-                          <p className="text-xs text-muted-foreground italic bg-muted/30 p-2 rounded border border-border/30">
-                            {d.notas}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
+              <div className="space-y-1.5">
+                <Label htmlFor="obs-donacion">Observaciones (opcional)</Label>
+                <Textarea
+                  id="obs-donacion"
+                  placeholder="Ej. Aporte para conservación"
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  className="min-h-[70px] resize-none"
+                />
               </div>
+
+              <Button
+                onClick={registrar}
+                disabled={registrando || cargandoCaja || !cajaActual}
+                className="w-full h-12 gap-2 text-base font-semibold cursor-pointer"
+              >
+                {registrando ? <Spinner className="h-5 w-5" /> : <HandHeart className="h-5 w-5" />}
+                Registrar donación
+              </Button>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+
+          {/* Último recibo emitido */}
+          <div className="lg:col-span-2">
+            <Card className="bg-card/80 backdrop-blur-sm border-border/50 lg:sticky lg:top-24">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Último recibo</CardTitle>
+                <CardDescription>El PDF lo genera el servidor.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!ultimoRecibo ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground text-center">
+                    <FileText className="h-9 w-9 opacity-40" />
+                    <p className="text-sm">Aún no ha registrado ninguna donación.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <dl className="divide-y divide-border/50 rounded-lg border border-border/60 text-sm">
+                      <div className="flex justify-between gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">No. Recibo</dt>
+                        <dd className="font-mono font-semibold text-primary">
+                          {ultimoRecibo.numeroRecibo}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">Donante</dt>
+                        <dd className="text-right font-medium">
+                          {ultimoRecibo.nombreDonante || "Donante anónimo"}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">Monto</dt>
+                        <dd className="font-bold tabular-nums">{moneda(ultimoRecibo.monto)}</dd>
+                      </div>
+                      <div className="flex justify-between gap-3 px-3 py-2">
+                        <dt className="text-muted-foreground">Fecha</dt>
+                        <dd className="text-right text-xs">
+                          {formatearFechaHora(ultimoRecibo.fechaCreacion)}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <Button
+                      onClick={() => verPdf(ultimoRecibo)}
+                      disabled={pdfEnCursoId === ultimoRecibo.id}
+                      className="w-full gap-2 cursor-pointer"
+                    >
+                      {pdfEnCursoId === ultimoRecibo.id ? (
+                        <Spinner className="h-4 w-4" />
+                      ) : (
+                        <FileText className="h-4 w-4" />
+                      )}
+                      Ver recibo en PDF
+                    </Button>
+
+                    <p className="text-[11px] text-muted-foreground text-center">
+                      Documento no contable: no tiene validez fiscal ni sustituye a una factura.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {(pestana === "historial" || !puedeCrear) && (
+        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <History className="h-5 w-5 text-primary" />
+                Recibos de donación
+              </CardTitle>
+              <CardDescription>
+                Los recibos se ordenan por fecha; el folio es texto, no un número.
+              </CardDescription>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar folio o donante..."
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="pl-9 bg-muted/40 border-border/60 h-9 text-xs"
+              />
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            {cargandoLista ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <Spinner className="h-7 w-7 text-primary" />
+                <p className="text-sm text-muted-foreground">Cargando recibos...</p>
+              </div>
+            ) : (
+              <>
+                <div className="hidden md:block rounded-md border border-border/50 overflow-hidden">
+                  <Table>
+                    <TableHeader className="bg-muted/40">
+                      <TableRow>
+                        <TableHead className="w-[160px]">No. Recibo</TableHead>
+                        <TableHead>Donante</TableHead>
+                        <TableHead className="text-right">Monto</TableHead>
+                        <TableHead>Registró</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead className="w-[140px] text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {donaciones.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                            No hay recibos que coincidan con la búsqueda.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        donaciones.map((d) => (
+                          <TableRow
+                            key={d.id}
+                            className={cn(
+                              d.anulado
+                                ? "bg-destructive/[0.06] border-l-4 border-l-destructive opacity-80"
+                                : "hover:bg-muted/20 border-l-4 border-l-transparent",
+                            )}
+                          >
+                            <TableCell className="font-mono text-xs font-semibold text-primary">
+                              {d.numeroRecibo}
+                              {d.anulado && (
+                                <Badge
+                                  variant="outline"
+                                  className="ml-2 text-[10px] border-destructive/40 text-destructive"
+                                >
+                                  Anulado
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {d.nombreDonante || (
+                                <span className="text-muted-foreground italic">
+                                  Donante anónimo
+                                </span>
+                              )}
+                              {d.anulado && d.motivoAnulacion && (
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                  Motivo: {d.motivoAnulacion}
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-bold tabular-nums">
+                              {moneda(d.monto)}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {d.usuario?.nombre || "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                              {formatearFechaHora(d.fechaCreacion)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={pdfEnCursoId === d.id || anulandoId === d.id}
+                                    className="h-8 w-8 cursor-pointer"
+                                    aria-label={`Acciones del recibo ${d.numeroRecibo}`}
+                                  >
+                                    {pdfEnCursoId === d.id || anulandoId === d.id ? (
+                                      <Spinner className="h-4 w-4" />
+                                    ) : (
+                                      <MoreVertical className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-48">
+                                  <DropdownMenuItem
+                                    onClick={() => verPdf(d)}
+                                    className="cursor-pointer"
+                                  >
+                                    <FileText className="mr-2 h-4 w-4 text-primary" />
+                                    Ver recibo en PDF
+                                  </DropdownMenuItem>
+
+                                  {/* Anular exige Donaciones/Anular y que la
+                                      caja de origen siga abierta. */}
+                                  {puedeAnular && !d.anulado && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onClick={() => setAAnular(d)}
+                                        className="text-destructive focus:text-destructive cursor-pointer"
+                                      >
+                                        <Ban className="mr-2 h-4 w-4" />
+                                        Anular recibo
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {/* Vista móvil */}
+                <div className="grid grid-cols-1 gap-3 md:hidden">
+                  {donaciones.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg p-4 border border-border/50 text-sm">
+                      No hay recibos que coincidan con la búsqueda.
+                    </div>
+                  ) : (
+                    donaciones.map((d) => (
+                      <div
+                        key={d.id}
+                        className={cn(
+                          "p-4 rounded-xl border space-y-3 shadow-sm",
+                          d.anulado
+                            ? "border-destructive/40 bg-destructive/[0.06] border-l-4 border-l-destructive"
+                            : "border-border/60 bg-card/60",
+                        )}
+                      >
+                        <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                          <span className="font-mono text-xs font-bold text-primary">
+                            {d.numeroRecibo}
+                          </span>
+                          {d.anulado && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-destructive/40 text-destructive"
+                            >
+                              Anulado
+                            </Badge>
+                          )}
+                        </div>
+
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <h4 className="font-semibold text-sm text-foreground truncate">
+                              {d.nombreDonante || "Donante anónimo"}
+                            </h4>
+                            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Calendar className="h-3 w-3" />
+                              {formatearFechaHora(d.fechaCreacion)}
+                            </p>
+                          </div>
+                          <p className="font-extrabold text-base text-foreground shrink-0">
+                            {moneda(d.monto)}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => verPdf(d)}
+                            disabled={pdfEnCursoId === d.id}
+                            className="flex-1 gap-1.5 h-9 text-xs cursor-pointer"
+                          >
+                            {pdfEnCursoId === d.id ? (
+                              <Spinner className="h-3.5 w-3.5" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5" />
+                            )}
+                            PDF
+                          </Button>
+                          {puedeAnular && !d.anulado && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setAAnular(d)}
+                              disabled={anulandoId === d.id}
+                              className="flex-1 gap-1.5 h-9 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                              Anular
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {total > LIMITE && (
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-xs text-muted-foreground">
+                      Página {pagina} de {totalPaginas} · {total} recibos
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                        disabled={pagina <= 1}
+                        className="gap-1 cursor-pointer"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Anterior
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                        disabled={pagina >= totalPaginas}
+                        className="gap-1 cursor-pointer"
+                      >
+                        Siguiente
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <AlertDialog
+        open={aAnular !== null}
+        onOpenChange={(abierto) => {
+          if (!abierto && anulandoId === null) {
+            setAAnular(null);
+            setMotivoAnulacion("");
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-[calc(100%-3rem)] sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular este recibo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              El recibo <strong>{aAnular?.numeroRecibo}</strong> por{" "}
+              <strong>{moneda(aAnular?.monto)}</strong> dejará de contar en el arqueo. Solo es
+              posible mientras la caja donde se registró siga abierta.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="motivo-anulacion" className="text-xs">
+              Motivo (opcional)
+            </Label>
+            <Input
+              id="motivo-anulacion"
+              placeholder="Ej. Error de captura"
+              value={motivoAnulacion}
+              onChange={(e) => setMotivoAnulacion(e.target.value)}
+              className="h-10"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Queda guardado en el recibo y en la bitácora.
+            </p>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={anulandoId !== null} className="cursor-pointer">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                anular();
+              }}
+              disabled={anulandoId !== null}
+              className="bg-destructive text-white hover:bg-destructive/90 cursor-pointer gap-2"
+            >
+              {anulandoId !== null && <Spinner className="h-4 w-4" />}
+              Sí, anular
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
