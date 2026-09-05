@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { Toaster } from "@/components/ui/sonner";
 import { ProveedorAutenticacion } from "@/contexto/contexto_autenticacion";
 import { BarraNavegacionInferior } from "@/componentes/barra_navegacion_inferior";
+import { RegistroServiceWorker } from "@/componentes/registro_service_worker";
 import "./globals.css";
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -54,6 +55,7 @@ export default function RootLayout({
           {children}
           <BarraNavegacionInferior />
           <Toaster position="top-center" richColors />
+          <RegistroServiceWorker />
         </ProveedorAutenticacion>
         <Analytics />
       </body>

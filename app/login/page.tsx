@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   RefreshCw,
   Lock,
+  CloudOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,7 +34,9 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { LogosInstitucionales } from "@/componentes/logos_institucionales";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
-import { api } from "@/lib/api";
+import { api, esErrorDeRed } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { ErrorSesionOffline, listarCorreosOffline } from "@/lib/sesion_offline";
 
 const esquemaLogin = z.object({
   correo: z.string().min(1, "El correo es requerido").email("Ingrese un correo válido"),
@@ -66,9 +69,14 @@ type VistaAuth = "login" | "solicitar" | "restablecer";
 
 export default function AutenticacionPage() {
   const router = useRouter();
-  const { iniciarSesion, estaAutenticado, cargando } = useAutenticacion();
-  
+  const { iniciarSesion, iniciarSesionSinConexion, estaAutenticado, cargando } =
+    useAutenticacion();
+
   const [vista, setVista] = useState<VistaAuth>("login");
+  /** Se muestra el aviso solo si este dispositivo tiene algún acceso offline
+   *  preparado; ofrecerlo sin credencial guardada sería prometer de más. */
+  const [hayAccesoOffline, setHayAccesoOffline] = useState(false);
+  const [enLinea, setEnLinea] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [mostrarContrasena, setMostrarContrasena] = useState(false);
   
@@ -80,9 +88,22 @@ export default function AutenticacionPage() {
 
   useEffect(() => {
     if (!cargando && estaAutenticado) {
-      router.replace("/usuarios");
+      router.replace("/registro-visitantes");
     }
   }, [cargando, estaAutenticado, router]);
+
+  useEffect(() => {
+    setEnLinea(navigator.onLine !== false);
+    const alConectar = () => setEnLinea(true);
+    const alDesconectar = () => setEnLinea(false);
+    window.addEventListener("online", alConectar);
+    window.addEventListener("offline", alDesconectar);
+    void listarCorreosOffline().then((correos) => setHayAccesoOffline(correos.length > 0));
+    return () => {
+      window.removeEventListener("online", alConectar);
+      window.removeEventListener("offline", alDesconectar);
+    };
+  }, []);
 
   // Formulario Iniciar Sesión
   const formLogin = useForm<FormularioLogin>({
@@ -123,12 +144,36 @@ export default function AutenticacionPage() {
       });
       router.push("/registro-visitantes");
     } catch (err: unknown) {
+      // Sin red no son credenciales inválidas: es que la petición nunca llegó.
+      // Se intenta contra el verificador guardado en este dispositivo.
+      if (esErrorDeRed(err)) {
+        await entrarSinConexion(datos.correo, datos.contrasena);
+        return;
+      }
       const mensaje = err instanceof Error ? err.message : "Error al iniciar sesión";
       toast.error("Credenciales inválidas", {
         description: mensaje,
       });
     } finally {
       setEnviando(false);
+    }
+  };
+
+  const entrarSinConexion = async (correo: string, contrasena: string) => {
+    try {
+      const usuarioLocal = await iniciarSesionSinConexion(correo, contrasena);
+      toast.success("Sesión iniciada sin conexión", {
+        description: `${usuarioLocal.nombre} · Las ventas se subirán al recuperar internet`,
+      });
+      router.push("/registro-visitantes");
+    } catch (err: unknown) {
+      const mensaje =
+        err instanceof Error ? err.message : "No se pudo iniciar sesión sin conexión";
+      const intentos =
+        err instanceof ErrorSesionOffline && err.intentosRestantes !== undefined
+          ? ` Quedan ${err.intentosRestantes} intentos antes de bloquear el acceso sin conexión.`
+          : "";
+      toast.error("Sin conexión con el servidor", { description: `${mensaje}${intentos}` });
     }
   };
 
@@ -304,6 +349,27 @@ export default function AutenticacionPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {/* Sin red, el mismo formulario valida contra el verificador
+                  guardado en este dispositivo. No hay botón aparte: el
+                  taquillero escribe lo de siempre y el sistema decide. */}
+              {!enLinea && (
+                <div
+                  className={cn(
+                    "mb-4 rounded-lg border px-3 py-2 text-xs flex items-start gap-2",
+                    hayAccesoOffline
+                      ? "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200"
+                      : "border-destructive/40 bg-destructive/10 text-destructive",
+                  )}
+                >
+                  <CloudOff className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    {hayAccesoOffline
+                      ? "Sin conexión. Puede entrar con la misma contraseña si ya inició sesión con internet en este dispositivo."
+                      : "Sin conexión y sin acceso preparado en este dispositivo. Se necesita internet para el primer inicio de sesión."}
+                  </span>
+                </div>
+              )}
+
               <form onSubmit={formLogin.handleSubmit(onSubmitLogin)} className="space-y-4">
                 {/* Correo Electrónico */}
                 <div className="space-y-2">

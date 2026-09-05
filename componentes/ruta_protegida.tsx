@@ -21,6 +21,19 @@ export function RutaProtegida({
   const { estaAutenticado, cargando, tienePermiso, tieneAccesoModulo, tieneAlgunPermiso, cerrarSesion, usuario } = useAutenticacion()
   const router = useRouter()
 
+  // Al volver con el botón "atrás", el navegador puede restaurar la pantalla
+  // desde su caché sin volver a ejecutar React, mostrando datos de una sesión
+  // ya vencida. Se revalida contra el token guardado y se expulsa si no hay.
+  useEffect(() => {
+    const alRestaurar = (e: PageTransitionEvent) => {
+      if (e.persisted && !localStorage.getItem('token')) {
+        window.location.replace('/login')
+      }
+    }
+    window.addEventListener('pageshow', alRestaurar)
+    return () => window.removeEventListener('pageshow', alRestaurar)
+  }, [])
+
   useEffect(() => {
     if (!cargando && !estaAutenticado) {
       router.replace('/login')

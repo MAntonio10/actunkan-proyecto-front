@@ -215,24 +215,34 @@ export default function RegistroVisitantesPage() {
 
                   {ticketsEmitidos.length > 0 && (
                     <div className="space-y-2">
-                      {/* Un PDF por ticket: con guía sin carnet se emiten dos */}
-                      {ticketsEmitidos.map((t) => (
-                        <Button
-                          key={t.id}
-                          onClick={() => abrirPdf(t)}
-                          disabled={pdfEnCursoId === t.id}
-                          className="w-full gap-2 cursor-pointer"
-                        >
-                          {pdfEnCursoId === t.id ? (
-                            <Spinner className="h-4 w-4" />
-                          ) : (
-                            <FileText className="h-4 w-4" />
-                          )}
-                          {ticketsEmitidos.length > 1
-                            ? `PDF ${t.tipoTicket === 'GUIA' ? 'del guía' : 'del visitante'}`
-                            : 'Ver PDF del pase'}
-                        </Button>
-                      ))}
+                      {/* El PDF lo arma el backend: sin conexión no está
+                          disponible. El pase en pantalla ya lleva el QR válido,
+                          así que el visitante puede pasar igual. */}
+                      {ticketsEmitidos.some((t) => t.origenOffline) ? (
+                        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+                          Emitido sin conexión: el PDF se podrá imprimir desde el historial cuando
+                          la venta suba. El código QR en pantalla ya es válido para el ingreso.
+                        </p>
+                      ) : (
+                        /* Un PDF por ticket: con guía sin carnet se emiten dos */
+                        ticketsEmitidos.map((t) => (
+                          <Button
+                            key={t.id}
+                            onClick={() => abrirPdf(t)}
+                            disabled={pdfEnCursoId === t.id}
+                            className="w-full gap-2 cursor-pointer"
+                          >
+                            {pdfEnCursoId === t.id ? (
+                              <Spinner className="h-4 w-4" />
+                            ) : (
+                              <FileText className="h-4 w-4" />
+                            )}
+                            {ticketsEmitidos.length > 1
+                              ? `PDF ${t.tipoTicket === 'GUIA' ? 'del guía' : 'del visitante'}`
+                              : 'Ver PDF del pase'}
+                          </Button>
+                        ))
+                      )}
                       <Button
                         variant="outline"
                         onClick={reiniciarEmision}

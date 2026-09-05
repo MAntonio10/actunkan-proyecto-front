@@ -41,7 +41,15 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, esErrorDeRed, hayConexion } from "@/lib/api";
+import { db } from "@/lib/db_tickets";
+import { asegurarFolios, estadoFolios, UMBRAL_AVISO, type EstadoFolios } from "@/lib/folios_offline";
+import {
+  emitirSinConexion,
+  espejarTicketsEmitidos,
+  precargarGuias,
+  ErrorEmisionOffline,
+} from "@/lib/emision_offline";
 import { SelectorGuia } from "./selector_guia";
 
 import {
@@ -117,6 +125,9 @@ export function FormularioVisitanteCompleto({
   const [catalogos, setCatalogos] = useState<CatalogosTickets | null>(null);
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
+  /** Los catálogos vienen del almacenamiento local: pueden traer tarifas viejas. */
+  const [desdeCache, setDesdeCache] = useState(false);
+  const [folios, setFolios] = useState<EstadoFolios | null>(null);
 
   // Selecciones del formulario, todas por id real del catálogo
   const [idAtraccion, setIdAtraccion] = useState<number | null>(null);
@@ -167,7 +178,25 @@ export function FormularioVisitanteCompleto({
   const cargarCatalogos = useCallback(async () => {
     setCargandoCatalogos(true);
     try {
-      const res = await api.tickets.getCatalogos();
+      let res: CatalogosTickets;
+      try {
+        res = await api.tickets.getCatalogos();
+        // Se cachean para poder abrir el formulario sin red. Sin esto, offline
+        // la pantalla de emisión ni siquiera llega a dibujarse.
+        await db.catalogos.put({
+          clave: "actual",
+          datos: res,
+          fechaDescarga: new Date().toISOString(),
+        });
+        setDesdeCache(false);
+      } catch (error) {
+        if (!esErrorDeRed(error)) throw error;
+        const cache = await db.catalogos.get("actual");
+        if (!cache) throw error;
+        res = cache.datos;
+        setDesdeCache(true);
+      }
+
       setCatalogos(res);
       // Por ref: si dependiera del prop, un cambio de identidad del callback
       // volvería a disparar la carga de catálogos.
@@ -195,6 +224,22 @@ export function FormularioVisitanteCompleto({
       setCargandoCatalogos(false);
     }
   }, []);
+
+  // Inventario de folios pre-firmados: sin ellos no hay venta sin conexión.
+  const refrescarEstadoFolios = useCallback(async () => {
+    try {
+      setFolios(await asegurarFolios());
+    } catch {
+      setFolios(await estadoFolios());
+    }
+  }, []);
+
+  useEffect(() => {
+    refrescarEstadoFolios();
+    // El catálogo de guías se guarda al entrar, no al abrir el selector: un
+    // turno que arranca sin señal debe encontrarlo ya cargado.
+    void precargarGuias();
+  }, [refrescarEstadoFolios]);
 
   useEffect(() => {
     cargarCatalogos();
@@ -499,20 +544,72 @@ export function FormularioVisitanteCompleto({
 
     setEnviando(true);
     try {
-      const respuesta = await api.tickets.emitir(payload);
+      // Con red se emite contra el backend, que es quien resuelve precio, folio
+      // y PDF. Sin red se consume un folio pre-firmado del inventario local: el
+      // visitante igual se lleva un QR válido, y la venta sube después.
+      let respuesta: RespuestaEmisionTicket;
+      let sinConexion = false;
+
+      const emitirLocal = () =>
+        emitirSinConexion({
+          payload,
+          catalogos: catalogos!,
+          montoVisitantes: calculos.subtotalVisitantes,
+          montoGuia: calculos.montoGuiaIndependiente,
+          requiereTicketGuia: datosGuiaCalculados.requiereTicketSeparado,
+          // El guía se pasa completo para que el historial offline lo muestre.
+          // En modo "nuevo" todavía no tiene id: lo asigna el backend al subir.
+          guia:
+            modoGuia === "sin_guia"
+              ? undefined
+              : {
+                  id: modoGuia === "existente" ? (idGuiaSeleccionado ?? 0) : 0,
+                  nombre: nombreGuiaInput.trim(),
+                  tieneCarnet: tieneCarnetGuia,
+                },
+        });
+
+      if (!hayConexion()) {
+        respuesta = await emitirLocal();
+        sinConexion = true;
+      } else {
+        try {
+          respuesta = await api.tickets.emitir(payload);
+          await espejarTicketsEmitidos(respuesta.tickets);
+        } catch (error) {
+          // La red se cayó entre el clic y el envío. No se puede dar la venta
+          // por perdida ni repetirla a ciegas: el backend pudo haberla creado.
+          // Se emite local con folio propio; si la original sí entró, el
+          // duplicado se detecta al conciliar el lote.
+          if (!esErrorDeRed(error)) throw error;
+          respuesta = await emitirLocal();
+          sinConexion = true;
+        }
+      }
+
       onTicketEmitido?.(respuesta);
+      void refrescarEstadoFolios();
 
       const cantidadTickets = respuesta.tickets.length;
-      toast.success(
-        cantidadTickets > 1
-          ? `Se emitieron ${cantidadTickets} tickets exitosamente`
-          : "Ticket emitido exitosamente",
-        {
-          description: `${datos.nombre_grupo} · ${atraccionActual?.nombre} · Total Q${parseFloat(
-            respuesta.montoTotalGeneral,
-          ).toFixed(2)}`,
-        },
-      );
+      const descripcion = `${datos.nombre_grupo} · ${atraccionActual?.nombre} · Total Q${parseFloat(
+        respuesta.montoTotalGeneral,
+      ).toFixed(2)}`;
+
+      if (sinConexion) {
+        toast.success(
+          cantidadTickets > 1
+            ? `${cantidadTickets} tickets emitidos sin conexión`
+            : "Ticket emitido sin conexión",
+          { description: `${descripcion} · Se subirá al recuperar internet` },
+        );
+      } else {
+        toast.success(
+          cantidadTickets > 1
+            ? `Se emitieron ${cantidadTickets} tickets exitosamente`
+            : "Ticket emitido exitosamente",
+          { description: descripcion },
+        );
+      }
 
       reset();
       setCantidades((prev) => {
@@ -533,6 +630,16 @@ export function FormularioVisitanteCompleto({
       setErrorCantidades(null);
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : "No se pudo emitir el ticket";
+
+      if (err instanceof ErrorEmisionOffline) {
+        toast.error(
+          err.codigo === "PAGO_NO_EFECTIVO" ? "Cobro con tarjeta no disponible" : "Sin folios disponibles",
+          { description: mensaje },
+        );
+        void refrescarEstadoFolios();
+        return;
+      }
+
       // El backend exige una caja abierta para vender y responde 400 si no la hay
       const esFaltaDeCaja = err instanceof ApiError && err.status === 400 && /caja/i.test(mensaje);
       toast.error(esFaltaDeCaja ? "No hay caja abierta" : "Error al emitir el ticket", {
@@ -634,6 +741,47 @@ export function FormularioVisitanteCompleto({
 
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          {/* Estado del modo sin conexión: folios disponibles y frescura de las
+              tarifas. El taquillero necesita enterarse antes de quedarse en
+              cero, no cuando ya no puede vender. */}
+          {desdeCache && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Trabajando sin conexión con las tarifas guardadas en este dispositivo. Si un precio
+                cambió mientras tanto, el sistema lo señalará al sincronizar.
+              </span>
+            </div>
+          )}
+
+          {folios?.vencido && folios.disponibles > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <BadgeAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                El lote de folios venció. Todavía se puede vender con los {folios.disponibles} que
+                quedan, pero conéctese a internet para renovarlo cuanto antes.
+              </span>
+            </div>
+          )}
+
+          {folios && folios.idLote !== null && folios.bajoUmbral && (
+            <div
+              className={cn(
+                "rounded-lg border px-3 py-2 text-xs flex items-start gap-2",
+                folios.disponibles === 0
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+              )}
+            >
+              <BadgeAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                {folios.disponibles === 0
+                  ? "Sin folios para vender sin conexión. Conéctese a internet para reponerlos."
+                  : `Quedan ${folios.disponibles} folios para venta sin conexión (aviso bajo ${UMBRAL_AVISO}). Conéctese para reponerlos.`}
+              </span>
+            </div>
+          )}
+
           {/* Atracción / Destino */}
           <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold">

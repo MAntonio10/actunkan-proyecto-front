@@ -1507,3 +1507,269 @@ Notas de uso:
 - Para **editar precios** sí hay endpoints: ver sección 12 (`/tarifas`).
 - `/tipos-gasto` sigue existiendo aparte porque pertenece al sub-módulo `Gastos` de `Cajas`, no a la emisión de tickets.
 
+
+
+
+
+---
+## 18. Venta offline (`/tickets/lotes-offline`, `/tickets/emitir-offline`)
+
+Permite vender tickets **sin conexión a internet**, entregando al visitante un pase con QR **válido desde el momento de la venta**.
+
+La idea es simple: el servidor entrega **folios pre-firmados** mientras hay red; el dispositivo los consume después, sin ella; al reconectar sube la cola y cada folio se convierte en un ticket real.
+
+Diseño completo en `ESPECIFICACION_OFFLINE.md`.
+
+### Conceptos
+
+| Término | Qué es |
+|---|---|
+| **Folio reservado** | Un número de ticket con su firma HMAC, generado **antes** de que exista la venta |
+| **Lote** | Un bloque de folios, atado a un usuario, un dispositivo y **la caja abierta al reservarlo** |
+
+Estados del folio:
+
+```
+                    ┌─── conciliar ──────────> NO_UTILIZADO
+RESERVADO ──────────┼─── invalidar el lote ──> INVALIDADO
+                    └─── emitir-offline ─────> EMITIDO ──validar──> EMITIDO + fechaUso
+```
+
+> **Solo un folio `EMITIDO` autoriza el ingreso.** Un folio reservado tiene firma criptográficamente válida pero no corresponde a ninguna venta. Como vive en su propia tabla y no en `Ticket`, **`POST /tickets/validar` responde `404`** por él, idéntico a un folio inexistente — sin mensaje que revele que existe, para no confirmarle a nadie que el rango del bloque es real.
+
+**Permisos:** todo se gobierna con `EmisionTickets`, igual que el resto de la emisión.
+
+**Solo efectivo.** Sin conexión no hay pasarela, así que no hay cobro con tarjeta: cualquier otra forma de pago se rechaza al subir.
+
+---
+
+### 18.1 `POST /tickets/lotes-offline` (Reservar folios)
+* **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Crear'`
+* **Request Body (JSON):**
+```json
+{ "cantidad": 100, "idDispositivo": "b3f1c2d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d" }
+```
+
+| Campo | Reglas |
+|---|---|
+| `cantidad` | Entero de 1 a 200 |
+| `idDispositivo` | UUID persistente que genera el navegador; máximo 64 caracteres |
+
+* **Exige caja abierta** (`400` si no hay). La caja **no la envía el cliente**: se toma la abierta actual.
+
+* **Response (201 Created - JSON):**
+```json
+{
+  "idLote": 7,
+  "idAperturaCaja": 12,
+  "idUsuario": 3,
+  "idDispositivo": "b3f1c2d4-…",
+  "estado": "ACTIVO",
+  "fechaCreacion": "2026-08-20T13:00:00.000Z",
+  "expiraEn": "2026-08-21T06:00:00.000Z",
+  "expirado": false,
+  "folios": [
+    {
+      "numeroTicket": "TCK-2026-000101",
+      "firma": "9f2a7c…",
+      "qr": "{\"numeroTicket\":\"TCK-2026-000101\",\"firma\":\"9f2a7c…\"}"
+    }
+  ]
+}
+```
+
+> **El campo `qr` viene armado por el servidor**, en el mismo formato exacto que la emisión online. No lo reconstruya en el frontend: un cambio futuro de formato rompería los pases offline en silencio y el problema aparecería recién en la puerta de la cueva.
+
+* **Errores:**
+
+```json
+{ "codigo": "LOTE_ACTIVO_EXISTENTE", "idLote": 7 }
+```
+`409` si ese dispositivo ya tiene un lote activo. Concílielo primero, o recupérelo con 18.2.
+
+> **Pida lotes chicos, no el máximo por costumbre.** Cada folio que quede sin vender consume un número del correlativo y deja un hueco permanente en la numeración. Lotes chicos también limitan el daño si se pierde el dispositivo.
+>
+> Un lote **vencido** deja de bloquear la reserva del día siguiente, pero **sus folios siguen en `RESERVADO`**: si quedaron ventas sin subir, todavía pueden subirse.
+
+---
+
+### 18.2 `GET /tickets/lotes-offline/activo` (Recuperar el lote)
+* **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Ver'`
+* **Query Param:** `idDispositivo` (obligatorio)
+
+Para cuando se reinstala la aplicación o se borra el almacenamiento local. Sin esto los folios quedan inutilizables hasta que expiren y el taquillero no puede vender.
+
+* **Response (200 OK - JSON):**
+```json
+{ "hayLoteActivo": true, "lote": { "…": "misma forma que 18.1" } }
+```
+o `{ "hayLoteActivo": false, "lote": null }`.
+
+Solo devuelve los folios que siguen en `RESERVADO`.
+
+> **Exige que coincidan usuario y dispositivo.** Este endpoint vuelve a exponer folios pre-firmados; desde otra sesión responde `hayLoteActivo: false`, no los entrega.
+
+---
+
+### 18.3 `POST /tickets/emitir-offline` (Subir la cola de ventas)
+* **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Crear'`
+* **Request Body (JSON):** hasta **50 ventas** por llamada.
+```json
+{
+  "idLote": 7,
+  "ventas": [
+    {
+      "idLocal": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "numeroTicket": "TCK-2026-000101",
+      "numeroTicketGuia": "TCK-2026-000102",
+      "fechaEmision": "2026-08-20T14:32:11.000Z",
+      "montoCobrado": "85.00",
+
+      "nombreGrupo": "Familia Rodríguez",
+      "idAtraccion": 1,
+      "idOrigen": 1,
+      "idPais": null,
+      "idTipoRecorrido": 1,
+      "cantidades": [{ "idTipoVisitante": 1, "cantidad": 2 }],
+      "idOpcionPago": 1,
+      "notas": "Grupo con reserva previa",
+      "guia": { "modo": "nuevo", "nombre": "Pedro Ak'abal", "tieneCarnet": false }
+    }
+  ]
+}
+```
+
+Todo lo que va después de `montoCobrado` es el payload de `POST /tickets/emitir` sin cambios.
+
+| Campo | Notas |
+|---|---|
+| `idLocal` | **UUID de 36 caracteres**, generado por el dispositivo. Es la clave de idempotencia |
+| `numeroTicket` | Folio reservado que el dispositivo ya imprimió |
+| `numeroTicketGuia` | Segundo folio, solo si la venta lleva guía sin carnet |
+| `fechaEmision` | ISO 8601. Momento real de la venta |
+| `montoCobrado` | **Texto**, no número: evita perder centavos en el punto flotante de JSON |
+
+* **Response (200 OK - JSON):** éxito parcial. **Nunca un `4xx` para el lote completo** si al menos un ítem es válido — el resto corresponde a dinero que ya entró al cajón.
+```json
+{
+  "procesadas": 2,
+  "resultados": [
+    { "idLocal": "f47ac10b-…", "estado": "CREADO", "discrepancia": null, "ticket": { "…": "TicketBackend" } },
+    { "idLocal": "a91bd22c-…", "estado": "DUPLICADO_IGNORADO", "ticket": { "…": "…" } },
+    { "idLocal": "c02ef88a-…", "estado": "RECHAZADO", "codigo": "FOLIO_YA_EMITIDO", "mensaje": "…" }
+  ]
+}
+```
+
+**Códigos de rechazo:**
+
+| Código | Significa |
+|---|---|
+| `FOLIO_NO_RESERVADO` | El folio no existe, o ya no está disponible |
+| `FOLIO_YA_EMITIDO` | **El dispositivo gastó dos veces el mismo folio**: hay una venta cobrada que se va a perder. Hay que investigarla |
+| `FOLIO_DE_OTRO_LOTE` | El folio pertenece a otro lote |
+| `LOTE_INVALIDADO` | El lote se invalidó; ninguna venta suya puede subirse |
+| `PAGO_NO_EFECTIVO` | Offline solo se vende en efectivo |
+| `CATALOGO_INVALIDO` | Datos de la venta inválidos (atracción, país, categoría…) |
+
+> El resultado **por ítem** es lo que le permite al frontend distinguir *"no hubo red, reintento"* de *"el servidor lo rechazó, aviso al taquillero y no reintento"*. Sin esa distinción, la cola reintenta para siempre una venta que nunca va a entrar.
+
+#### Reglas que aplica el servidor
+
+1. **Idempotencia.** Un `idLocal` ya registrado devuelve `DUPLICADO_IGNORADO` sin crear nada. Es lo que permite reintentar tras un timeout ambiguo. *(Garantizado por un índice único; ver 18.7.)*
+2. **La caja es la del lote**, no la que esté abierta al subir: la venta ocurrió en aquel turno y ahí tiene que cuadrar.
+3. **La fecha del dispositivo se acota** al rango `[creación del lote, ahora]`. Viene del reloj del aparato y no es confiable; un reloj mal puesto mandaría la venta al arqueo de otro día.
+4. **El precio se recalcula con la tarifa vigente en `fechaEmision`**, no con la de hoy. Una venta de ayer se recalcula con el precio de ayer.
+5. **Un guía nuevo repetido se reutiliza.** Offline es normal que el mismo guía acompañe a varios grupos del turno: la primera venta lo crea y las demás lo reutilizan. *(La emisión online sigue rechazando nombres repetidos con `409`, porque ahí el taquillero puede corregir en el momento.)*
+6. **Cada venta va en su propia transacción**: una con datos malos no aborta las otras 49.
+
+#### Discrepancia de monto
+
+Si lo cobrado difiere de lo recalculado, la venta **se registra igual**:
+
+```json
+"discrepancia": { "montoCobrado": "30", "montoRecalculado": "40", "diferencia": "-10" }
+```
+
+> **No se rechaza por discrepancia.** El visitante ya pagó y ya entró; rechazar dejaría dinero en la caja sin ticket que lo respalde, que es peor. El `TicketPago` se crea por **lo cobrado** —que es lo que hay en el cajón— y la diferencia queda en `Ticket.montoRecalculado` y en el arqueo (sección 8.5), visible solo para un supervisor.
+
+---
+
+### 18.4 `POST /tickets/lotes-offline/:id/conciliar` (Cerrar el lote)
+* **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Crear'`
+* **Request Body (JSON, opcional):** el dispositivo declara lo que hizo, como contraste.
+```json
+{
+  "foliosUtilizados": ["TCK-2026-000101", "TCK-2026-000102"],
+  "foliosNoUtilizados": ["TCK-2026-000103"]
+}
+```
+* **Response (200 OK - JSON):**
+```json
+{
+  "idLote": 7,
+  "estado": "CONCILIADO",
+  "emitidos": 12,
+  "noUtilizados": 88,
+  "advertencias": [
+    { "numeroTicket": "TCK-2026-000140", "detalle": "Declarado utilizado, sin ticket registrado" }
+  ]
+}
+```
+
+Todo folio que siga en `RESERVADO` pasa a `NO_UTILIZADO`, para que la auditoría no vea huecos inexplicados en la secuencia.
+
+> **Un folio declarado vendido del que el servidor no tiene ticket sale como advertencia, no como error.** Significa una venta que se perdió (almacenamiento corrupto, cola borrada) y hay que investigarla, pero bloquear la conciliación dejaría la caja sin poder cerrarse.
+
+* Falla con `400` si el lote ya estaba conciliado o invalidado. **Conciliar es requisito para cerrar la caja** (ver 8.6).
+
+---
+
+### 18.5 `DELETE /tickets/lotes-offline/:id` (Invalidar lote)
+* **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Anular'`
+* **Response (200 OK - JSON):**
+```json
+{ "idLote": 7, "estado": "INVALIDADO", "foliosInvalidados": 88 }
+```
+
+Para dispositivo perdido o robado. Los folios en `RESERVADO` pasan a `INVALIDADO` y las subidas posteriores contra ese lote se rechazan. **Los folios ya emitidos no se tocan: esas ventas existen.**
+
+> **Destruye las ventas offline que todavía no se hubieran subido.** Ese dinero quedaría cobrado sin ticket. Usar solo cuando el dispositivo no va a volver.
+
+---
+
+### 18.6 Un usuario dado de baja conserva el derecho a sincronizar
+
+Si a un taquillero lo dan de baja **mientras su dispositivo está sin conexión**, sus ventas ya cobradas quedarían atrapadas: el guard lo rechazaría con `401` al reconectar, y la caja quedaría con dinero que ningún ticket respalda.
+
+**Baja no es repudio de lo actuado.** Las ventas ocurrieron mientras la sesión era legítima; impedir que se registren no las deshace, solo las esconde.
+
+**Qué puede hacer un usuario anulado:**
+
+| Endpoint | Por qué |
+|---|---|
+| `POST /auth/refresh` | Sin token de acceso vigente no puede llamar a nada más |
+| `POST /tickets/emitir-offline` | Es el acto de liquidar lo ya vendido |
+| `POST /tickets/lotes-offline/:id/conciliar` | Cerrar el lote para que la caja pueda cerrarse |
+
+Todo lo demás sigue devolviendo `401`. En particular **no** puede reservar folios nuevos ni recuperar folios pre-firmados: eso sería seguir operando, no liquidar.
+
+**Cómo se hace cumplir:**
+
+1. El derecho **está atado a que haya algo que liquidar**: solo se renueva la sesión si el usuario tiene un lote `ACTIVO` y sin vencer. Sin eso, la baja es total y `/auth/refresh` responde `401`.
+2. El token de acceso que recibe viene marcado con **`soloSincronizacion: true`** y el guard lo **rechaza en cualquier otro handler**, incluso si el usuario volviera a estar activo. Sin esto, refrescar tras la baja devolvería acceso completo y la baja no serviría de nada.
+3. Cada renovación queda en Bitácora como **`REFRESH_USUARIO_ANULADO`**, indicando qué lote la justifica.
+
+La respuesta del refresh lo anuncia, para que el frontend pueda mostrar solo la pantalla de sincronización:
+
+```json
+{
+  "access_token": "…",
+  "refresh_token": "…",
+  "solo_sincronizacion": true,
+  "aviso": "Su usuario fue deshabilitado. Esta sesión solo permite subir y conciliar las ventas offline pendientes; el resto del sistema no está disponible."
+}
+```
+
+
+

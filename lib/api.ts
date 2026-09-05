@@ -31,8 +31,19 @@ import {
   DonacionBackend,
   FiltrosDonaciones,
   RespuestaHistorialDonaciones,
+  ActividadParqueBackend,
+  PayloadActividad,
+  FiltrosActividades,
+  RespuestaHistorialActividades,
+  ImagenActividad,
+  SectorParqueBackend,
   RespuestaConfirmacionPago,
   RespuestaPagoTicket,
+  LoteOfflineBackend,
+  RespuestaLoteActivo,
+  VentaOffline,
+  RespuestaEmisionOffline,
+  RespuestaConciliacionLote,
 } from '@/tipos'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
@@ -77,6 +88,70 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * La petición nunca llegó al servidor. Es una categoría aparte de ApiError a
+ * propósito: el sincronizador offline reintenta ante ErrorDeRed y se detiene
+ * ante un rechazo del backend. Sin esa distinción, una venta que el servidor
+ * rechaza se reintentaría para siempre.
+ */
+export class ErrorDeRed extends Error {
+  constructor(mensaje = 'Sin conexión con el servidor') {
+    super(mensaje)
+    this.name = 'ErrorDeRed'
+  }
+}
+
+export function esErrorDeRed(error: unknown): boolean {
+  return error instanceof ErrorDeRed
+}
+
+/** Pista del navegador, no garantía: `true` puede significar wifi conectado sin
+ *  salida a internet. Sirve para decidir si vale la pena intentar, no para dar
+ *  por buena una conexión. */
+export function hayConexion(): boolean {
+  return typeof navigator === 'undefined' ? true : navigator.onLine !== false
+}
+
+/**
+ * Conexión *observada*: la que se deduce de si las peticiones al backend llegan
+ * o no.
+ *
+ * `navigator.onLine` solo mira la interfaz de red, así que da `true` con el
+ * wifi conectado aunque no haya salida a internet o el servidor esté caído. Por
+ * eso la barra decía "En línea" sin conexión real. Acá se marca `false` en
+ * cuanto una petición falla por red y `true` en cuanto una responde.
+ *
+ * Es solo para mostrar estado. Para decidir si vale la pena *intentar* una
+ * petición se sigue usando `hayConexion()`: si un fallo apagara los intentos,
+ * nunca se descubriría que la conexión volvió.
+ */
+let conexionObservada = true
+const oyentesConexion = new Set<(enLinea: boolean) => void>()
+
+function marcarConexion(enLinea: boolean): void {
+  if (conexionObservada === enLinea) return
+  conexionObservada = enLinea
+  oyentesConexion.forEach((oyente) => oyente(enLinea))
+}
+
+export function conexionActual(): boolean {
+  return hayConexion() && conexionObservada
+}
+
+export function suscribirConexion(oyente: (enLinea: boolean) => void): () => void {
+  oyentesConexion.add(oyente)
+  return () => {
+    oyentesConexion.delete(oyente)
+  }
+}
+
+if (typeof window !== 'undefined') {
+  // Al reconectar la interfaz se vuelve a dar el beneficio de la duda: la
+  // próxima petición confirmará o desmentirá.
+  window.addEventListener('online', () => marcarConexion(true))
+  window.addEventListener('offline', () => marcarConexion(false))
+}
+
 export function obtenerToken(): string | null {
   return typeof window !== 'undefined' ? localStorage.getItem('token') : null
 }
@@ -88,12 +163,34 @@ export function obtenerRefreshToken(): string | null {
 export function guardarTokens(tokens: RespuestaTokens): void {
   localStorage.setItem('token', tokens.access_token)
   localStorage.setItem('refresh_token', tokens.refresh_token)
+  if (tokens.solo_sincronizacion) {
+    localStorage.setItem('solo_sincronizacion', '1')
+    if (tokens.aviso) localStorage.setItem('aviso_sesion', tokens.aviso)
+  } else {
+    localStorage.removeItem('solo_sincronizacion')
+    localStorage.removeItem('aviso_sesion')
+  }
+}
+
+/**
+ * El usuario fue dado de baja mientras su dispositivo estaba sin conexión y el
+ * backend le renovó la sesión únicamente para liquidar lo ya vendido
+ * (DOCUMENTACION_ENDPOINTS.md 18.6). Todo lo demás responde 401 por diseño.
+ */
+export function esSoloSincronizacion(): boolean {
+  return typeof window !== 'undefined' && localStorage.getItem('solo_sincronizacion') === '1'
+}
+
+export function avisoDeSesion(): string | null {
+  return typeof window !== 'undefined' ? localStorage.getItem('aviso_sesion') : null
 }
 
 export function limpiarSesionLocal(): void {
   localStorage.removeItem('token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('usuario')
+  localStorage.removeItem('solo_sincronizacion')
+  localStorage.removeItem('aviso_sesion')
 }
 
 // Un solo refresh en vuelo: si varias peticiones reciben 401 a la vez, todas
@@ -105,11 +202,20 @@ async function refrescarTokens(): Promise<string | null> {
   const refreshToken = obtenerRefreshToken()
   if (!refreshToken) return null
 
-  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+  } catch {
+    // Si el refresco no llegó al servidor, la sesión no está vencida: está
+    // incomunicada. Devolver null acá haría que el llamador la borrara y
+    // expulsara al taquillero al login justo cuando no puede iniciar sesión.
+    marcarConexion(false)
+    throw new ErrorDeRed()
+  }
 
   if (!response.ok) return null
 
@@ -121,7 +227,10 @@ async function refrescarTokens(): Promise<string | null> {
 function refrescarTokensUnaVez(): Promise<string | null> {
   if (!refrescoEnCurso) {
     refrescoEnCurso = refrescarTokens()
-      .catch(() => null)
+      .catch((error) => {
+        if (error instanceof ErrorDeRed) throw error
+        return null
+      })
       .finally(() => {
         refrescoEnCurso = null
       })
@@ -134,8 +243,12 @@ async function ejecutar(
   options: RequestInit,
   token: string | null
 ): Promise<Response> {
+  // Con FormData no se fija Content-Type: el navegador debe ponerlo junto con
+  // el boundary del multipart. Fijarlo a mano rompe la subida de archivos.
+  const esFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(esFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   }
 
@@ -143,7 +256,17 @@ async function ejecutar(
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  return fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
+    marcarConexion(true)
+    return respuesta
+  } catch {
+    // fetch solo lanza cuando la petición no llegó a completarse (sin red, DNS
+    // caído, servidor inalcanzable). Se traduce a un error propio para que
+    // quien llama no lo confunda con una respuesta de error del backend.
+    marcarConexion(false)
+    throw new ErrorDeRed()
+  }
 }
 
 /**
@@ -159,7 +282,13 @@ async function ejecutarConAuth(endpoint: string, options: RequestInit = {}): Pro
 
   // Si no hay token y el endpoint requiere autenticación, redirigir al login silenciosamente
   if (!token && !esPublico && typeof window !== 'undefined') {
-    window.location.href = '/login'
+    // Sin conexión no se redirige: una sesión restaurada sin internet puede no
+    // tener access token todavía, y mandarla al login la sacaría de una
+    // pantalla donde sí puede seguir vendiendo contra el almacenamiento local.
+    if (!hayConexion()) {
+      throw new ErrorDeRed()
+    }
+    window.location.replace('/login')
     // Lanzar error silencioso para cortar la ejecución sin mostrar toast
     throw new ApiError('Sesión no activa', 401)
   }
@@ -191,8 +320,14 @@ async function ejecutarConAuth(endpoint: string, options: RequestInit = {}): Pro
 
     // 401 tras haber agotado el intento de refresco: la sesión ya no se recupera
     if (response.status === 401 && trata401ComoSesion && typeof window !== 'undefined') {
-      limpiarSesionLocal()
-      window.location.href = '/login'
+      // Salvo en la sesión de solo sincronización, donde el 401 es lo esperado:
+      // el backend habilita únicamente subir y conciliar las ventas offline, y
+      // devuelve 401 en todo lo demás. Borrar la sesión acá dejaría el dinero
+      // ya cobrado sin forma de llegar nunca al sistema.
+      if (!esSoloSincronizacion()) {
+        limpiarSesionLocal()
+        window.location.replace('/login')
+      }
     }
 
     throw new ApiError(errorMessage, response.status)
@@ -217,9 +352,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
  * No se puede abrir la URL directa en una pestaña nueva: el endpoint exige
  * `Authorization: Bearer`, y una navegación del navegador no envía esa cabecera.
  */
-async function solicitarBlob(endpoint: string): Promise<Blob> {
+async function solicitarBlob(endpoint: string, accept = 'application/pdf'): Promise<Blob> {
   const response = await ejecutarConAuth(endpoint, {
-    headers: { Accept: 'application/pdf' },
+    headers: { Accept: accept },
   })
   return response.blob()
 }
@@ -499,6 +634,48 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+
+    // ---- Emisión sin conexión. Contrato en ESPECIFICACION_OFFLINE.md ----
+
+    // Folios pre-firmados para vender sin red. El servidor toma la caja abierta
+    // actual; el cliente no la elige.
+    reservarLoteOffline: (data: { cantidad: number; idDispositivo: string }) =>
+      request<LoteOfflineBackend>('/tickets/lotes-offline', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    // Recupera el lote vigente tras reinstalar la app o perder el almacenamiento
+    // local; sin esto los folios quedan inservibles hasta que expiren.
+    loteOfflineActivo: (idDispositivo: string) =>
+      request<RespuestaLoteActivo>(
+        `/tickets/lotes-offline/activo?idDispositivo=${encodeURIComponent(idDispositivo)}`,
+      ),
+
+    // Sube la cola. Responde éxito parcial por venta: una rechazada no arrastra
+    // a las demás del lote.
+    emitirOffline: (data: { idLote: number; ventas: VentaOffline[] }) =>
+      request<RespuestaEmisionOffline>('/tickets/emitir-offline', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    // Cierra el lote: los folios sin usar pasan a NO_UTILIZADO para que la
+    // auditoría no vea huecos en la secuencia. Requisito para cerrar la caja.
+    conciliarLoteOffline: (
+      idLote: number,
+      data: { foliosUtilizados: string[]; foliosNoUtilizados: string[] },
+    ) =>
+      request<RespuestaConciliacionLote>(`/tickets/lotes-offline/${idLote}/conciliar`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    // Solo para dispositivo perdido: destruye las ventas offline no subidas.
+    invalidarLoteOffline: (idLote: number) =>
+      request<{ mensaje?: string }>(`/tickets/lotes-offline/${idLote}`, {
+        method: 'DELETE',
+      }),
   },
 
   // 9. Guías (módulo EmisionTickets)
@@ -756,6 +933,124 @@ export const api = {
       request<DonacionBackend>(`/donaciones/${id}`, {
         method: 'DELETE',
         body: JSON.stringify(motivo ? { motivo } : {}),
+      }),
+  },
+
+  // 16. Actividades del Parque
+  // La autoría manda sobre el permiso: editar, anular y administrar imágenes
+  // solo los puede hacer el autor, aunque otro tenga la acción concedida.
+  actividades: {
+    // El autor se toma del token: enviar idUsuarioAutor devuelve 400.
+    crear: (data: PayloadActividad) =>
+      request<ActividadParqueBackend>('/actividades', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    listar: (params?: FiltrosActividades) => {
+      const queryParams = new URLSearchParams()
+      if (params?.buscar) queryParams.append('buscar', params.buscar)
+      if (params?.idSectorParque)
+        queryParams.append('idSectorParque', String(params.idSectorParque))
+      if (params?.idUsuarioAutor)
+        queryParams.append('idUsuarioAutor', String(params.idUsuarioAutor))
+      if (params?.soloMias) queryParams.append('soloMias', 'true')
+      if (params?.incluirExpiradas) queryParams.append('incluirExpiradas', 'true')
+      if (params?.incluirAnuladas) queryParams.append('incluirAnuladas', 'true')
+      if (params?.soloAnuladas) queryParams.append('soloAnuladas', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
+      const queryStr = queryParams.toString()
+      return request<RespuestaHistorialActividades>(
+        `/actividades${queryStr ? `?${queryStr}` : ''}`,
+      )
+    },
+
+    // 404 (no 403) si está fuera de su ventana y quien consulta no es el autor:
+    // para un tercero, una publicación fuera de ventana simplemente no existe.
+    getById: (id: number) => request<ActividadParqueBackend>(`/actividades/${id}`),
+
+    // `fechaFin: null` quita la expiración; omitirla la deja como está.
+    actualizar: (id: number, data: Partial<PayloadActividad>) =>
+      request<ActividadParqueBackend>(`/actividades/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+
+    anular: (id: number) =>
+      request<ActividadParqueBackend>(`/actividades/${id}`, {
+        method: 'DELETE',
+      }),
+
+    // Devuelve la publicación a la vista. Como anular, solo puede el autor, y
+    // exige `Editar` (no `Anular`), igual que el resto de reactivaciones del
+    // sistema. 400 si ya estaba activa. La ventana no se toca: una publicación
+    // expirada vuelve expirada.
+    activar: (id: number) =>
+      request<ActividadParqueBackend>(`/actividades/${id}/activar`, {
+        method: 'PATCH',
+      }),
+
+    // multipart/form-data con el archivo en el campo `imagen`
+    subirImagen: (id: number, archivo: File) => {
+      const fd = new FormData()
+      fd.append('imagen', archivo)
+      return request<ImagenActividad>(`/actividades/${id}/imagenes`, {
+        method: 'POST',
+        body: fd,
+      })
+    },
+
+    // Va por endpoint y no como archivo estático para respetar permiso y
+    // ventana de visibilidad. Como exige Authorization, un <img src> directo
+    // no funciona: hay que pedirla como blob y usar un object URL.
+    getImagen: (id: number, idImagen: number) =>
+      solicitarBlob(`/actividades/${id}/imagenes/${idImagen}`, 'image/*'),
+
+    // A diferencia del resto del sistema, esto sí borra fila y archivo.
+    eliminarImagen: (id: number, idImagen: number) =>
+      request<{ mensaje: string; id: number }>(`/actividades/${id}/imagenes/${idImagen}`, {
+        method: 'DELETE',
+      }),
+  },
+
+  // 17. Sectores del Parque
+  // No es un módulo de permiso aparte: se gobierna con ActividadesParque, igual
+  // que los catálogos de emisión viven bajo EmisionTickets.
+  sectores: {
+    // 409 si el nombre existe, incluso si ese sector está anulado: en ese caso
+    // hay que reactivarlo, no crear un duplicado indistinguible en el selector.
+    crear: (nombre: string) =>
+      request<SectorParqueBackend>('/sectores', {
+        method: 'POST',
+        body: JSON.stringify({ nombre }),
+      }),
+
+    // Arreglo plano sin paginación: es un catálogo corto para un selector.
+    listar: (incluirAnulados = false) =>
+      request<SectorParqueBackend[]>(
+        `/sectores${incluirAnulados ? '?incluirAnulados=true' : ''}`,
+      ),
+
+    getById: (id: number) => request<SectorParqueBackend>(`/sectores/${id}`),
+
+    // Renombrar se refleja en todas las actividades: se guarda la referencia,
+    // no una copia del nombre.
+    actualizar: (id: number, nombre: string) =>
+      request<SectorParqueBackend>(`/sectores/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ nombre }),
+      }),
+
+    activar: (id: number) =>
+      request<SectorParqueBackend>(`/sectores/${id}/activar`, {
+        method: 'PATCH',
+      }),
+
+    // Baja lógica: sale del selector, el historial no se reescribe.
+    anular: (id: number) =>
+      request<SectorParqueBackend>(`/sectores/${id}`, {
+        method: 'DELETE',
       }),
   },
 }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MenuModulos } from "./menu_modulos";
 import { IndicadorConectividad } from "./indicador_conectividad";
+import { IndicadorSincronizacion } from "./indicador_sincronizacion";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { LogosInstitucionales } from "./logos_institucionales";
 import { motion } from "framer-motion";
@@ -32,16 +33,11 @@ export function BarraNavegacionSuperior() {
       .toUpperCase() || "U";
 
   return (
-    <motion.header
-      initial={{ y: -24, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 320, damping: 30 }}
-      className="sticky top-0 z-50 w-full backdrop-blur-md"
-    >
+    <header className="sticky top-0 z-50 w-full bg-card">
       {/* Capa de fondo con gradiente sutil */}
       <div
         aria-hidden
-        className="absolute inset-0 -z-10 bg-card/85"
+        className="absolute inset-0 -z-10 bg-card"
         style={{
           backgroundImage:
             "linear-gradient(180deg, color-mix(in oklch, var(--primary) 6%, var(--card)) 0%, var(--card) 100%)",
@@ -62,12 +58,7 @@ export function BarraNavegacionSuperior() {
           <MenuModulos />
 
           {/* Logo y nombre */}
-          <motion.div
-            className="flex items-center gap-3"
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1, duration: 0.3 }}
-          >
+          <div className="flex items-center gap-3">
             <motion.div
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.97 }}
@@ -92,16 +83,12 @@ export function BarraNavegacionSuperior() {
                 Parque Regional Municipal ACTÚN KAN
               </span>
             </div>
-          </motion.div>
+          </div>
         </div>
 
         {/* Derecha: Indicador conectividad + Usuario */}
-        <motion.div
-          className="flex items-center gap-3"
-          initial={{ opacity: 0, x: 8 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.15, duration: 0.3 }}
-        >
+        <div className="flex items-center gap-3">
+          <IndicadorSincronizacion />
           <IndicadorConectividad />
 
           {/* Info del usuario */}
@@ -150,8 +137,8 @@ export function BarraNavegacionSuperior() {
             </TooltipTrigger>
             <TooltipContent>Cerrar sesión</TooltipContent>
           </Tooltip>
-        </motion.div>
+        </div>
       </div>
-    </motion.header>
+    </header>
   );
 }

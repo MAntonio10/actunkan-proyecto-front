@@ -7,7 +7,11 @@ import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
-import { resolverModulosPermitidos, type ItemModulo } from "./modulos_navegacion";
+import {
+  resolverModulosPermitidos,
+  ordenarParaMovil,
+  type ItemModulo,
+} from "./modulos_navegacion";
 
 const SPRING_SUAVE = { type: "spring" as const, stiffness: 380, damping: 32 };
 
@@ -16,16 +20,22 @@ export function BarraNavegacionInferior() {
   const [expandido, setExpandido] = useState(false);
   // Los módulos vienen del contexto: se cargan una vez por sesión y se
   // comparten con el menú de escritorio, en vez de pedirlos por separado.
-  const { tieneAlgunPermiso, modulosPermitidos: modulosMenu } = useAutenticacion();
+  const { tieneAlgunPermiso, modulosPermitidos: modulosMenu, enLinea } = useAutenticacion();
+
+  // La píldora sigue esta ruta, no pathname: así se desplaza en el mismo
+  // gesto del toque en vez de esperar a que el módulo destino monte y cargue
+  // sus datos, que es lo que provocaba el tirón.
+  const [rutaOptimista, setRutaOptimista] = useState<string | null>(null);
 
   // Colapsar automáticamente al cambiar de ruta
   useEffect(() => {
     setExpandido(false);
+    setRutaOptimista(null);
   }, [pathname]);
 
   const modulosPermitidos = useMemo(
-    () => resolverModulosPermitidos(modulosMenu),
-    [modulosMenu],
+    () => ordenarParaMovil(resolverModulosPermitidos(modulosMenu, { enLinea })),
+    [modulosMenu, enLinea],
   );
 
   if (!tieneAlgunPermiso()) {
@@ -44,8 +54,9 @@ export function BarraNavegacionInferior() {
   // No mostrar en login, páginas públicas de pago o si no hay ningún módulo permitido
   if (pathname === "/login" || pathname.startsWith("/pago") || modulosPermitidos.length === 0) return null;
 
+  const rutaActiva = rutaOptimista ?? pathname;
   const estaActivo = (ruta: string) =>
-    pathname === ruta || pathname.startsWith(ruta + "/");
+    rutaActiva === ruta || rutaActiva.startsWith(ruta + "/");
   const algunSecundarioActivo = modulosSecundarios.some((i) =>
     estaActivo(i.ruta),
   );
@@ -66,6 +77,8 @@ export function BarraNavegacionInferior() {
       >
         <Link
           href={item.ruta}
+          prefetch
+          onClick={() => setRutaOptimista(item.ruta)}
           aria-current={activo ? "page" : undefined}
           className={cn(
             itemBaseClass,
@@ -122,7 +135,7 @@ export function BarraNavegacionInferior() {
           transition={SPRING_SUAVE}
           className={cn(
             "overflow-hidden border border-border/60",
-            "bg-background/90 backdrop-blur-xl",
+            "bg-background",
             "shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)]",
             expandido ? "rounded-[28px]" : "rounded-[32px]",
             modulosPermitidos.length === 1 ? "w-auto px-6 py-1" : "w-full max-w-md"

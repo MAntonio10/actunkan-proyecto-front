@@ -23,6 +23,16 @@ export interface ItemModulo {
   icono: LucideIcon
   iconoDesktop: LucideIcon
   ruta: string
+  /**
+   * La pantalla sirve para algo sin conexión. Solo estos módulos se muestran en
+   * la navegación mientras no hay red.
+   *
+   * Debe coincidir con `RUTAS_APP` de `public/sw.js`: el resto de rutas no está
+   * precacheado, así que navegar a ellas sin señal termina en la pantalla de
+   * error del navegador. Ocultarlas es más honesto que ofrecer un destino que
+   * no carga, y que cachear pantallas cuyos datos vienen todos de la API.
+   */
+  disponibleSinConexion?: boolean
 }
 
 /**
@@ -39,6 +49,7 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     icono: Home,
     iconoDesktop: ScanLine,
     ruta: '/registro-visitantes',
+    disponibleSinConexion: true,
   },
   Usuarios: {
     id: 'usuarios',
@@ -67,6 +78,15 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     iconoDesktop: HandHeart,
     ruta: '/donaciones',
   },
+  ActividadesParque: {
+    id: 'actividades',
+    nombre: 'Actividades',
+    nombreLargo: 'Actividades',
+    descripcion: 'Publicaciones de actividades del parque',
+    icono: ClipboardList,
+    iconoDesktop: ClipboardList,
+    ruta: '/actividades',
+  },
   Bitacora: {
     id: 'bitacora',
     nombre: 'Bitácora',
@@ -94,22 +114,16 @@ export const MODULOS_SIN_BACKEND: ItemModulo[] = [
     ruta: '/reportes',
   },
   {
-    id: 'actividades',
-    nombre: 'Actividades',
-    nombreLargo: 'Actividades',
-    descripcion: 'Registro de actividades del parque',
-    icono: ClipboardList,
-    iconoDesktop: ClipboardList,
-    ruta: '/actividades',
-  },
-  {
     id: 'sincronizacion',
     nombre: 'Sync',
     nombreLargo: 'Sincronización',
-    descripcion: 'Estado offline',
+    descripcion: 'Cola offline, folios y diagnóstico',
     icono: CloudCog,
     iconoDesktop: CloudCog,
     ruta: '/sincronizacion',
+    // Lee solo del almacenamiento local, así que funciona sin red — y es
+    // justamente cuando más se necesita, porque es cuando la cola crece.
+    disponibleSinConexion: true,
   },
 ]
 
@@ -119,7 +133,10 @@ export const MODULOS_SIN_BACKEND: ItemModulo[] = [
  * no están en MODULOS_BACKEND a propósito: viven como pestaña dentro de su
  * módulo padre, así que no deben generar un item de navegación duplicado.
  */
-export function resolverModulosPermitidos(modulosMenu: ModuloMenu[]): ItemModulo[] {
+export function resolverModulosPermitidos(
+  modulosMenu: ModuloMenu[],
+  opciones: { enLinea?: boolean } = {},
+): ItemModulo[] {
   // El índice se arma normalizado para que un módulo renombrado en la base de
   // datos ('Bitácora' vs 'Bitacora') siga encontrando su entrada.
   const indice = new Map(
@@ -129,12 +146,44 @@ export function resolverModulosPermitidos(modulosMenu: ModuloMenu[]): ItemModulo
     ]),
   )
 
+  // El orden lo fija la declaración de MODULOS_BACKEND, no el que devuelva el
+  // servidor: así la posición de cada módulo en el menú es estable.
+  const ordenDeclarado = Object.values(MODULOS_BACKEND).map((i) => i.id)
+
   const delBackend = modulosMenu
     .map((m) => indice.get(normalizarNombreModulo(m.nombre)))
     .filter((item): item is ItemModulo => Boolean(item))
+    .sort((a, b) => ordenDeclarado.indexOf(a.id) - ordenDeclarado.indexOf(b.id))
 
   const vistos = new Set(delBackend.map((i) => i.id))
   const pendientes = MODULOS_SIN_BACKEND.filter((i) => !vistos.has(i.id))
 
-  return [...delBackend, ...pendientes]
+  const todos = [...delBackend, ...pendientes]
+
+  // Sin red se ocultan los módulos cuyas pantallas no están precacheadas: el
+  // Service Worker no puede servirlas y el enlace terminaría en la pantalla de
+  // error del navegador. Un menú más corto describe mejor lo que de verdad se
+  // puede hacer en ese momento.
+  if (opciones.enLinea === false) {
+    return todos.filter((i) => i.disponibleSinConexion)
+  }
+
+  return todos
+}
+
+/**
+ * Orden para la barra móvil: deja Inicio al centro de la fila principal, que
+ * es la posición más cómoda para el pulgar. En escritorio no aplica: ahí el
+ * menú es una cuadrícula y Emisión de Tickets va primero.
+ */
+export function ordenarParaMovil(items: ItemModulo[]): ItemModulo[] {
+  const inicio = items.find((i) => i.id === 'inicio')
+  if (!inicio) return items
+
+  const resto = items.filter((i) => i.id !== 'inicio')
+  // La fila principal muestra hasta 4 items; se centra dentro de ese grupo.
+  const centro = Math.floor(Math.min(4, items.length) / 2)
+  const salida = [...resto]
+  salida.splice(centro, 0, inicio)
+  return salida
 }

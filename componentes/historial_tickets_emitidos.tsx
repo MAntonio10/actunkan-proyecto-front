@@ -25,6 +25,9 @@ import {
   Send,
   RefreshCw,
   ExternalLink,
+  CloudOff,
+  TriangleAlert,
+  PauseCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -75,7 +78,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { api } from "@/lib/api";
+import { api, esErrorDeRed } from "@/lib/api";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { usePdfTicket } from "@/hooks/use_pdf_ticket";
 import {
@@ -84,15 +87,59 @@ import {
   esPagoPagado,
   esPagoCancelado,
 } from "@/lib/utils_pagos";
+import { ticketsPendientesDeSubir } from "@/lib/emision_offline";
+import { suscribirSincronizacion } from "@/lib/sincronizador_tickets";
 import {
   type CatalogosTickets,
   type TicketBackend,
+  type TicketLocalNoSincronizado,
   type MetricasTickets,
   type RespuestaPagoTicket,
 } from "@/tipos";
 
 const LIMITE_POR_PAGINA = 50;
 const TODOS = "todos";
+
+/** Un ticket local no existe en el backend: no tiene PDF ni se puede anular. */
+function esLocal(t: TicketBackend): t is TicketLocalNoSincronizado {
+  return "estadoSincronizacion" in t;
+}
+
+/** Distintivo de fila local. Se repite en escritorio, móvil y detalle: el
+ *  taquillero tiene que poder distinguirlo mire donde mire. */
+function BadgeLocal({ ticket }: { ticket: TicketLocalNoSincronizado }) {
+  const variante = ticket.estadoSincronizacion === "anulada"
+    ? {
+        etiqueta: "ANULADA",
+        clase: "border-destructive/50 text-destructive bg-destructive/10",
+        icono: Ban,
+      }
+    : ticket.estadoSincronizacion === "rechazada"
+      ? {
+          etiqueta: "RECHAZADA",
+          clase: "border-destructive/50 text-destructive bg-destructive/10",
+          icono: TriangleAlert,
+        }
+      : ticket.estadoSincronizacion === "retenida"
+        ? {
+            etiqueta: "RETENIDA",
+            clase: "border-slate-500/50 text-slate-600 dark:text-slate-300 bg-slate-500/10",
+            icono: PauseCircle,
+          }
+        : {
+            etiqueta: "SIN SUBIR",
+            clase: "border-amber-500/50 text-amber-700 dark:text-amber-400 bg-amber-500/15",
+            icono: CloudOff,
+          };
+
+  const Icono = variante.icono;
+  return (
+    <Badge variant="outline" className={cn("text-[9px] px-1 py-0 font-bold gap-1", variante.clase)}>
+      <Icono className="h-2.5 w-2.5" />
+      {variante.etiqueta}
+    </Badge>
+  );
+}
 
 interface Props {
   catalogos: CatalogosTickets | null;
@@ -142,6 +189,9 @@ function AccionesTicket({
 }) {
   const url = extraerCheckoutUrl(ticket);
   const esPendiente = esPagoPendiente(ticket.estadoPago);
+  // El PDF lo arma el backend y la anulación exige que el ticket exista allá:
+  // ninguna de las dos aplica a una venta que todavía no subió.
+  const local = esLocal(ticket);
 
   return (
     <DropdownMenu>
@@ -161,12 +211,14 @@ function AccionesTicket({
           <Eye className="mr-2 h-4 w-4 text-blue-500" />
           Ver detalle
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onPdf(ticket)} className="cursor-pointer">
-          <FileText className="mr-2 h-4 w-4 text-primary" />
-          Ver PDF del pase
-        </DropdownMenuItem>
+        {!local && (
+          <DropdownMenuItem onClick={() => onPdf(ticket)} className="cursor-pointer">
+            <FileText className="mr-2 h-4 w-4 text-primary" />
+            Ver PDF del pase
+          </DropdownMenuItem>
+        )}
 
-        {(url || esPendiente) && (
+        {!local && (url || esPendiente) && (
           <>
             <DropdownMenuSeparator />
             {url ? (
@@ -205,7 +257,7 @@ function AccionesTicket({
         )}
 
         {/* Anular exige EmisionTickets/Anular y la caja de origen abierta */}
-        {puedeAnular && !ticket.anulado && (
+        {!local && puedeAnular && !ticket.anulado && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -242,10 +294,13 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
   const [pagina, setPagina] = useState(1);
 
-  const [tickets, setTickets] = useState<TicketBackend[]>([]);
+  const [ticketsServidor, setTicketsServidor] = useState<TicketBackend[]>([]);
+  const [ticketsLocales, setTicketsLocales] = useState<TicketLocalNoSincronizado[]>([]);
   const [total, setTotal] = useState(0);
   const [metricas, setMetricas] = useState<MetricasTickets | null>(null);
   const [cargando, setCargando] = useState(true);
+  /** El listado del backend no se pudo traer; se muestra solo lo local. */
+  const [servidorInalcanzable, setServidorInalcanzable] = useState(false);
 
   // El texto de búsqueda se aplica con retardo para no disparar una petición por tecla
   useEffect(() => {
@@ -267,13 +322,21 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
         pagina,
         limite: LIMITE_POR_PAGINA,
       });
-      setTickets(Array.isArray(res.datos) ? res.datos : []);
+      setTicketsServidor(Array.isArray(res.datos) ? res.datos : []);
       setTotal(res.total || 0);
       setMetricas(res.metricas || null);
+      setServidorInalcanzable(false);
     } catch (err: unknown) {
-      const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
-      toast.error("Error al cargar el historial", { description: mensaje });
-      setTickets([]);
+      // Sin red no es un error del historial: las ventas locales siguen ahí y
+      // son justamente lo que el taquillero necesita consultar en ese momento.
+      if (esErrorDeRed(err)) {
+        setServidorInalcanzable(true);
+      } else {
+        const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
+        toast.error("Error al cargar el historial", { description: mensaje });
+        setServidorInalcanzable(false);
+      }
+      setTicketsServidor([]);
       setTotal(0);
       setMetricas(null);
     } finally {
@@ -281,7 +344,63 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
     }
   }, [busquedaAplicada, filtroAtraccion, filtroPago, filtroEstado, pagina]);
 
+  const cargarLocales = useCallback(async () => {
+    try {
+      setTicketsLocales(await ticketsPendientesDeSubir());
+    } catch {
+      setTicketsLocales([]);
+    }
+  }, []);
+
+  // Depende de `refrescarToken` igual que el listado del servidor: la pestaña
+  // no se desmonta al cambiar, así que sin esto una venta recién emitida no
+  // aparecía hasta que alguien pulsara Actualizar.
+  //
+  // Además se suscribe a la cola: al subir una venta, su fila local tiene que
+  // desaparecer en el mismo momento en que el backend la devuelve, o quedaría
+  // duplicada en pantalla.
+  useEffect(() => {
+    cargarLocales();
+    return suscribirSincronizacion(() => {
+      void cargarLocales();
+    });
+  }, [cargarLocales, refrescarToken]);
+
+  /**
+   * Los locales se aplican solo en la primera página: la paginación la lleva el
+   * servidor y estas filas no forman parte de su conteo. Van al principio
+   * porque son siempre las más recientes de la jornada.
+   *
+   * Los filtros de texto, atracción y forma de pago se aplican acá a mano, ya
+   * que estas filas nunca pasaron por la consulta del backend.
+   */
+  const localesVisibles = useMemo(() => {
+    if (pagina !== 1) return [];
+
+    const opcionSeleccionada =
+      filtroPago !== TODOS
+        ? catalogos?.opcionesPago.find((o) => o.id === Number(filtroPago))
+        : undefined;
+    // Sin conexión solo se cobra en efectivo: con otro filtro de pago activo,
+    // ninguna venta local puede corresponder.
+    if (opcionSeleccionada && !opcionSeleccionada.esEfectivo) return [];
+
+    const texto = busquedaAplicada.trim().toLowerCase();
+
+    return ticketsLocales.filter((t) => {
+      if (filtroAtraccion !== TODOS && t.atraccion?.id !== Number(filtroAtraccion)) return false;
+      if (!texto) return true;
+      return (
+        t.numeroTicket.toLowerCase().includes(texto) ||
+        (t.nombre ?? "").toLowerCase().includes(texto) ||
+        (t.guia?.nombre ?? "").toLowerCase().includes(texto)
+      );
+    });
+  }, [ticketsLocales, pagina, busquedaAplicada, filtroAtraccion, filtroPago, catalogos]);
+
   const ticketsFiltrados = useMemo(() => {
+    const tickets = [...localesVisibles, ...ticketsServidor];
+
     if (filtroEstado === "activos") {
       return tickets.filter((t) => !t.anulado && !esPagoCancelado(t.estadoPago));
     }
@@ -295,11 +414,22 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
       return tickets.filter((t) => (esPagoPagado(t.estadoPago) || !t.estadoPago) && !t.anulado);
     }
     return tickets;
-  }, [tickets, filtroEstado]);
+  }, [localesVisibles, ticketsServidor, filtroEstado]);
 
   useEffect(() => {
     cargarTickets();
   }, [cargarTickets, refrescarToken]);
+
+  /** Vuelve a pedir el listado del servidor y relee la cola local.
+   *
+   *  No dispara la sincronización: recargar es una consulta, y subir ventas es
+   *  una acción con consecuencias sobre la caja. Para eso está "Subir ahora" en
+   *  el indicador de la barra superior, que además respeta el interruptor de
+   *  subida automática. */
+  const recargar = useCallback(async () => {
+    if (cargando) return;
+    await Promise.all([cargarTickets(), cargarLocales()]);
+  }, [cargando, cargarTickets, cargarLocales]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / LIMITE_POR_PAGINA));
 
@@ -318,6 +448,13 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
   }, [catalogos]);
 
   const pagoDe = (t: TicketBackend) => {
+    // El ticket local no trae `ticketPagos` porque el backend todavía no lo
+    // creó, pero la forma de pago no es ambigua: offline solo se vende en
+    // efectivo, así que se resuelve desde el catálogo.
+    if (esLocal(t)) {
+      const efectivo = catalogos?.opcionesPago.find((o) => o.esEfectivo);
+      return { nombre: efectivo?.nombre ?? "Efectivo", esEfectivo: true };
+    }
     const idOpcion = t.ticketPagos?.[0]?.idOpcionPago;
     return idOpcion ? nombreOpcionPago.get(idOpcion) : undefined;
   };
@@ -383,6 +520,14 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
   const abrirDetalle = useCallback(async (t: TicketBackend) => {
     setTicketDetalle(t);
     setInfoPago(null);
+
+    // Un ticket local no existe en el backend: pedir su detalle daría 404 y su
+    // `id` negativo ni siquiera es una ruta válida. Ya está completo en memoria.
+    if (esLocal(t)) {
+      setCargandoDetalle(false);
+      return;
+    }
+
     setCargandoDetalle(true);
     try {
       const completo = await api.tickets.getTicketById(t.id);
@@ -420,6 +565,21 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* Fuera de la tabla y de sus filtros: actualizar es una acción sobre toda
+          la pantalla, no un control más del listado. */}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={recargar}
+          disabled={cargando}
+          className="gap-2 cursor-pointer"
+        >
+          <RefreshCw className={cn("h-4 w-4", cargando && "animate-spin")} />
+          Actualizar
+        </Button>
+      </div>
+
       {/* Métricas calculadas por el servidor sobre el filtro completo, no solo la página */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
@@ -434,6 +594,14 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
               <p className="text-2xl font-bold text-primary">
                 {metricas?.totalTickets ?? "—"}
               </p>
+              {/* Las métricas las calcula el servidor y no incluyen lo que
+                  todavía no subió. Se suma aparte en vez de alterar el número:
+                  inflarlo lo volvería imposible de cuadrar contra el backend. */}
+              {ticketsLocales.length > 0 && (
+                <p className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+                  +{ticketsLocales.length} sin sincronizar
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -557,6 +725,28 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {servidorInalcanzable && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <CloudOff className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Sin conexión con el servidor. Solo se muestran las ventas hechas en este dispositivo
+                que aún no se han subido; el historial completo requiere internet.
+              </span>
+            </div>
+          )}
+
+          {localesVisibles.length > 0 && !servidorInalcanzable && (
+            <div className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-900 dark:text-sky-200 flex items-start gap-2">
+              <CloudOff className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>
+                Las filas marcadas <strong>SIN SUBIR</strong> existen solo en este dispositivo: no
+                tienen PDF ni se pueden anular hasta que la venta llegue al servidor. Las marcadas{" "}
+                <strong>RECHAZADA</strong> ya se cobraron y el servidor no las aceptó; hay que
+                resolverlas a mano o la caja no cuadra.
+              </span>
+            </div>
+          )}
+
           {cargando ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <Spinner className="h-7 w-7 text-primary" />
@@ -594,11 +784,14 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                         const esAnulado = t.anulado === true || esPagoCancelado(t.estadoPago);
                         return (
                           <TableRow
-                            key={t.id}
+                            key={t.numeroTicket}
                             className={cn(
                               esAnulado && "opacity-65 bg-destructive/[0.04] hover:bg-destructive/[0.08]",
-                              t.tipoTicket === "GUIA" && !esAnulado && "bg-amber-500/[0.07] hover:bg-amber-500/[0.12] border-l-4 border-l-amber-500",
-                              !esAnulado && t.tipoTicket !== "GUIA" && "hover:bg-muted/20 border-l-4 border-l-transparent"
+                              // El borde punteado a la izquierda distingue la fila
+                              // local de un vistazo, sin tener que leer el badge.
+                              esLocal(t) && !esAnulado && "bg-sky-500/[0.06] hover:bg-sky-500/[0.11] border-l-4 border-l-sky-500 border-dashed",
+                              !esLocal(t) && t.tipoTicket === "GUIA" && !esAnulado && "bg-amber-500/[0.07] hover:bg-amber-500/[0.12] border-l-4 border-l-amber-500",
+                              !esLocal(t) && !esAnulado && t.tipoTicket !== "GUIA" && "hover:bg-muted/20 border-l-4 border-l-transparent"
                             )}
                           >
                             <TableCell className="font-mono text-xs font-semibold">
@@ -606,6 +799,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 <span className={cn(esAnulado ? "line-through text-muted-foreground" : "text-primary")}>
                                   {t.numeroTicket}
                                 </span>
+                                {esLocal(t) && <BadgeLocal ticket={t} />}
                                 {esAnulado && (
                                   <Badge
                                     variant="outline"
@@ -760,22 +954,24 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                     const esAnulado = t.anulado === true || esPagoCancelado(t.estadoPago);
                     return (
                       <div
-                        key={t.id}
+                        key={t.numeroTicket}
                         className={cn(
                           "p-4 rounded-xl border space-y-3 shadow-sm",
                           esAnulado && "opacity-70 bg-destructive/[0.04] border-destructive/30",
-                          t.tipoTicket === "GUIA" && !esAnulado && "border-amber-500/40 bg-amber-500/[0.07] border-l-4 border-l-amber-500",
-                          !esAnulado && t.tipoTicket !== "GUIA" && "border-border/60 bg-card/60"
+                          esLocal(t) && !esAnulado && "border-sky-500/40 border-dashed bg-sky-500/[0.06] border-l-4 border-l-sky-500",
+                          !esLocal(t) && t.tipoTicket === "GUIA" && !esAnulado && "border-amber-500/40 bg-amber-500/[0.07] border-l-4 border-l-amber-500",
+                          !esLocal(t) && !esAnulado && t.tipoTicket !== "GUIA" && "border-border/60 bg-card/60"
                         )}
                       >
                         <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                          <span className="font-mono text-xs font-bold flex items-center gap-1.5">
+                          <span className="font-mono text-xs font-bold flex items-center gap-1.5 flex-wrap">
                             {t.tipoTicket === "GUIA" && (
                               <Compass className="h-3.5 w-3.5 text-amber-500" />
                             )}
                             <span className={cn(esAnulado ? "line-through text-muted-foreground" : "text-primary")}>
                               {t.numeroTicket}
                             </span>
+                            {esLocal(t) && <BadgeLocal ticket={t} />}
                             {esAnulado && (
                               <Badge
                                 variant="outline"
@@ -895,16 +1091,18 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                             <Eye className="h-3.5 w-3.5" />
                             Ver
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => abrirPdf(t)}
-                            className="flex-1 gap-1.5 h-9 text-xs cursor-pointer"
-                          >
-                            <FileText className="h-3.5 w-3.5" />
-                            PDF
-                          </Button>
-                          {puedeAnular && !t.anulado && (
+                          {!esLocal(t) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => abrirPdf(t)}
+                              className="flex-1 gap-1.5 h-9 text-xs cursor-pointer"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              PDF
+                            </Button>
+                          )}
+                          {!esLocal(t) && puedeAnular && !t.anulado && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -995,6 +1193,37 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           ) : (
             ticketDetalle && (
               <div className="space-y-4">
+                {esLocal(ticketDetalle) && (
+                  <div
+                    className={cn(
+                      "rounded-lg border p-3 space-y-1 text-xs",
+                      ticketDetalle.estadoSincronizacion === "rechazada"
+                        ? "border-destructive/40 bg-destructive/10 text-destructive"
+                        : "border-sky-500/40 bg-sky-500/10 text-sky-900 dark:text-sky-200",
+                    )}
+                  >
+                    <div className="flex items-center gap-2 font-bold">
+                      {ticketDetalle.estadoSincronizacion === "rechazada" ? (
+                        <TriangleAlert className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <CloudOff className="h-4 w-4 shrink-0" />
+                      )}
+                      <span>
+                        {ticketDetalle.estadoSincronizacion === "rechazada"
+                          ? "Venta rechazada por el servidor"
+                          : "Venta emitida sin conexión"}
+                      </span>
+                    </div>
+                    <p className="leading-relaxed">
+                      {ticketDetalle.estadoSincronizacion === "rechazada"
+                        ? `El cobro ya se hizo pero el servidor no aceptó la venta${
+                            ticketDetalle.motivoRechazo ? `: ${ticketDetalle.motivoRechazo}` : "."
+                          } Debe resolverse a mano o el arqueo de caja no cuadra.`
+                        : "Este ticket todavía no llegó al servidor. El código QR ya es válido para el ingreso; el PDF y la anulación estarán disponibles cuando la venta suba."}
+                    </p>
+                  </div>
+                )}
+
                 {ticketDetalle.anulado && (
                   <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 flex items-center gap-2 text-sm text-destructive">
                     <Ban className="h-4 w-4 shrink-0" />
@@ -1222,18 +1451,20 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                     </div>
                   )}
 
-                <Button
-                  onClick={() => abrirPdf(ticketDetalle)}
-                  disabled={pdfEnCursoId === ticketDetalle.id}
-                  className="w-full gap-2 cursor-pointer"
-                >
-                  {pdfEnCursoId === ticketDetalle.id ? (
-                    <Spinner className="h-4 w-4" />
-                  ) : (
-                    <FileText className="h-4 w-4" />
-                  )}
-                  Ver PDF del pase
-                </Button>
+                {!esLocal(ticketDetalle) && (
+                  <Button
+                    onClick={() => abrirPdf(ticketDetalle)}
+                    disabled={pdfEnCursoId === ticketDetalle.id}
+                    className="w-full gap-2 cursor-pointer"
+                  >
+                    {pdfEnCursoId === ticketDetalle.id ? (
+                      <Spinner className="h-4 w-4" />
+                    ) : (
+                      <FileText className="h-4 w-4" />
+                    )}
+                    Ver PDF del pase
+                  </Button>
+                )}
               </div>
             )
           )}

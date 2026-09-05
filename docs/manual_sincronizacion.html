@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Módulo de Sincronización — Manual de operación</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm 16mm 20mm 16mm;
+      }
+
+      :root {
+        --verde: #3f6b3c;
+        --verde-claro: #eaf1e6;
+        --texto: #1f2a1c;
+        --suave: #5b6657;
+        --borde: #d8d2c2;
+        --ambar: #9a6b12;
+        --ambar-fondo: #fdf6e6;
+        --rojo: #97302c;
+        --rojo-fondo: #fbeceb;
+        --gris-fondo: #f2f2ef;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        font-size: 10.5pt;
+        line-height: 1.55;
+        color: var(--texto);
+      }
+
+      h1 {
+        font-size: 21pt;
+        margin: 0 0 4px;
+        color: var(--verde);
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 14pt;
+        margin: 26px 0 8px;
+        color: var(--verde);
+        padding-bottom: 5px;
+        border-bottom: 2px solid var(--verde-claro);
+        break-after: avoid;
+      }
+      h3 {
+        font-size: 11.5pt;
+        margin: 18px 0 6px;
+        break-after: avoid;
+      }
+      p { margin: 0 0 9px; }
+      ul, ol { margin: 0 0 10px; padding-left: 20px; }
+      li { margin-bottom: 4px; }
+      strong { font-weight: 600; }
+      code {
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 9.5pt;
+        background: var(--gris-fondo);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+
+      .portada {
+        border-bottom: 3px solid var(--verde);
+        padding-bottom: 14px;
+        margin-bottom: 6px;
+      }
+      .subtitulo { color: var(--suave); font-size: 11pt; margin: 0; }
+      .meta { color: var(--suave); font-size: 9pt; margin-top: 8px; }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0 14px;
+        font-size: 9.5pt;
+        break-inside: avoid;
+      }
+      th {
+        background: var(--verde-claro);
+        color: var(--verde);
+        text-align: left;
+        padding: 7px 9px;
+        font-weight: 600;
+        border: 1px solid var(--borde);
+      }
+      td {
+        padding: 7px 9px;
+        border: 1px solid var(--borde);
+        vertical-align: top;
+      }
+      tbody tr:nth-child(even) { background: #fafaf7; }
+
+      .aviso {
+        border-left: 4px solid var(--verde);
+        background: var(--verde-claro);
+        padding: 10px 13px;
+        margin: 12px 0;
+        border-radius: 0 5px 5px 0;
+        break-inside: avoid;
+      }
+      .aviso.atencion { border-left-color: var(--ambar); background: var(--ambar-fondo); }
+      .aviso.grave { border-left-color: var(--rojo); background: var(--rojo-fondo); }
+      .aviso p:last-child { margin-bottom: 0; }
+      .aviso .titulo {
+        font-weight: 700;
+        display: block;
+        margin-bottom: 3px;
+        font-size: 10pt;
+      }
+
+      .etiqueta {
+        display: inline-block;
+        font-size: 8pt;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 9px;
+        border: 1px solid;
+        white-space: nowrap;
+      }
+      .e-pendiente { color: var(--ambar); border-color: var(--ambar); background: var(--ambar-fondo); }
+      .e-retenida { color: #4a5568; border-color: #a0aec0; background: #f0f2f5; }
+      .e-rechazada, .e-anulada { color: var(--rojo); border-color: var(--rojo); background: var(--rojo-fondo); }
+      .e-ok { color: var(--verde); border-color: var(--verde); background: var(--verde-claro); }
+
+      .seccion { break-inside: avoid-page; }
+      .salto { break-before: page; }
+
+      .pie {
+        margin-top: 28px;
+        padding-top: 10px;
+        border-top: 1px solid var(--borde);
+        font-size: 8.5pt;
+        color: var(--suave);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="portada">
+      <h1>Módulo de Sincronización</h1>
+      <p class="subtitulo">
+        Manual de operación · Sistema de tickets del Parque Regional Municipal Actún Kan
+      </p>
+      <p class="meta">Agosto 2026 · Para personal de taquilla y supervisión</p>
+    </header>
+
+    <h2>1. Para qué sirve este módulo</h2>
+
+    <p>
+      La taquilla puede vender aunque no haya internet. Cuando eso pasa, las ventas se guardan en el
+      dispositivo y suben solas al recuperar la señal. El módulo de Sincronización es la pantalla
+      donde se ve y se controla todo eso.
+    </p>
+
+    <p>Es también el <strong>único lugar</strong> donde se resuelven las ventas que quedaron a medias:</p>
+
+    <ul>
+      <li>Las que el servidor rechazó.</li>
+      <li>Las que se decidió no subir todavía.</li>
+      <li>Las que se anularon en taquilla antes de subirse.</li>
+    </ul>
+
+    <div class="aviso">
+      <span class="titulo">Funciona sin internet</span>
+      <p>
+        Toda la información de esta pantalla sale del propio dispositivo, no del servidor. Por eso
+        sigue disponible cuando se cae la red, que es justamente cuando más se necesita.
+      </p>
+    </div>
+
+    <h2>2. Dos conceptos que hay que entender primero</h2>
+
+    <h3>El folio</h3>
+    <p>
+      Un ticket vale porque lleva una <strong>firma</strong> que solo el servidor sabe calcular. Sin
+      internet no hay a quién pedírsela, así que el visitante se quedaría sin un pase válido.
+    </p>
+    <p>
+      La solución es pedirlas por adelantado. Mientras hay señal, el servidor entrega números de
+      ticket <strong>ya firmados</strong>, todavía sin venta asociada. Cada uno de esos números
+      guardados es un <strong>folio</strong>.
+    </p>
+
+    <h3>El lote</h3>
+    <p>
+      Los folios no se piden de a uno: se piden en paquetes de 100. Ese paquete es el
+      <strong>lote</strong>. Cada lote queda atado a la caja que estaba abierta cuando se pidió, y
+      tiene una fecha de vencimiento (normalmente el final de la jornada).
+    </p>
+
+    <div class="aviso">
+      <span class="titulo">Los folios solo se gastan sin conexión</span>
+      <p>
+        Con internet, la venta va directo al servidor y no toca el inventario. Un lote de 100 folios
+        alcanza para 100 ventas <em>sin señal</em>, no para 100 ventas en total.
+      </p>
+      <p>
+        Cada venta gasta un folio. Si lleva guía sin carnet, gasta dos, porque el guía genera su
+        propio ticket.
+      </p>
+    </div>
+
+    <h2 class="salto">3. Las tarjetas de resumen</h2>
+
+    <p>Arriba de la pantalla hay cuatro tarjetas. Cada una muestra la cantidad y el monto en quetzales.</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 24%">Tarjeta</th>
+          <th>Qué significa</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Conexión</strong></td>
+          <td>Si el dispositivo tiene internet en este momento.</td>
+        </tr>
+        <tr>
+          <td><strong>Por subir</strong></td>
+          <td>
+            Ventas cobradas que todavía no llegaron al servidor. Suben solas cuando vuelve la señal.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Retenidas</strong></td>
+          <td>
+            Ventas que alguien decidió dejar fuera de la subida a propósito. El dinero está cobrado
+            igual.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Rechazadas</strong></td>
+          <td>
+            El servidor no las aceptó. Son las que necesitan una decisión de una persona.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>4. Los folios: reponer y conciliar</h2>
+
+    <p>
+      El bloque de folios muestra cuántos quedan, cuántos se gastaron, el número de lote y cuándo
+      vence. Tiene dos botones, y conviene entender bien la diferencia.
+    </p>
+
+    <h3>Reponer</h3>
+
+    <p>
+      <strong>Qué hace:</strong> le pide al sistema que revise el inventario y lo deje listo para
+      trabajar sin señal.
+    </p>
+
+    <p>No siempre pide folios nuevos. Según cómo esté el inventario, hace una de estas cosas:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 38%">Si el inventario está así…</th>
+          <th>…entonces Reponer</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Sin ningún lote</td>
+          <td>Pide un lote nuevo de 100 folios</td>
+        </tr>
+        <tr>
+          <td>Con menos de 15 folios</td>
+          <td>Cierra el lote actual y pide otro de 100</td>
+        </tr>
+        <tr>
+          <td>Con el lote vencido</td>
+          <td>Pide un lote nuevo; del viejo se encarga el servidor</td>
+        </tr>
+        <tr>
+          <td>Con 15 folios o más y vigente</td>
+          <td><strong>No hace nada.</strong> No hace falta</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="aviso atencion">
+      <span class="titulo">Requiere internet y una caja abierta</span>
+      <p>
+        Los folios los entrega el servidor, así que sin señal el botón no puede hacer nada. Y el
+        lote se ata a una caja: sin caja abierta, el servidor rechaza la petición.
+      </p>
+    </div>
+
+    <p>
+      <strong>Cuándo usarlo:</strong> normalmente nunca. La reposición ocurre sola al abrir la
+      pantalla de emisión y al terminar de subir la cola. El botón está para forzarla antes de un
+      turno donde se sabe que no habrá señal.
+    </p>
+
+    <h3>Conciliar lote</h3>
+
+    <p>
+      <strong>Qué hace:</strong> cierra el lote de folios. Le informa al servidor cuáles se usaron y
+      cuáles no, y los que sobraron quedan marcados como <strong>no utilizados</strong>.
+    </p>
+
+    <p>
+      Es como devolver un talonario de boletos: se entrega diciendo cuáles se vendieron y cuáles
+      quedaron en blanco, para que ningún número quede sin explicación.
+    </p>
+
+    <div class="aviso">
+      <span class="titulo">Es requisito para cerrar la caja</span>
+      <p>
+        Mientras el lote siga abierto, el sistema no deja cerrar la caja. Tiene sentido: un lote
+        abierto significa que todavía podría haber alguien vendiendo con esos folios.
+      </p>
+      <p>
+        Al cerrar la caja, el sistema intenta conciliar solo. El botón está para hacerlo por
+        separado, por ejemplo al terminar el turno de un dispositivo.
+      </p>
+    </div>
+
+    <div class="aviso atencion">
+      <span class="titulo">No concilia si quedan ventas sin resolver</span>
+      <p>
+        Si hay ventas por subir o retenidas, el botón avisa y no hace nada. Primero hay que
+        subirlas, anularlas o resolverlas: son dinero cobrado que todavía no está en el sistema.
+      </p>
+    </div>
+
+    <p>
+      <strong>Un efecto importante:</strong> después de conciliar, el inventario local queda vacío.
+      Para volver a vender sin señal hay que reponer.
+    </p>
+
+    <h2 class="salto">5. Los estados de una venta</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 20%">Estado</th>
+          <th>Qué significa</th>
+          <th style="width: 24%">Qué hacer</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="etiqueta e-pendiente">PENDIENTE</span></td>
+          <td>Cobrada y esperando subir. Sube sola cuando vuelva la señal.</td>
+          <td>Nada</td>
+        </tr>
+        <tr>
+          <td><span class="etiqueta e-pendiente">SUBIENDO</span></td>
+          <td>Se está enviando en este momento.</td>
+          <td>Esperar</td>
+        </tr>
+        <tr>
+          <td><span class="etiqueta e-retenida">RETENIDA</span></td>
+          <td>Alguien la dejó fuera de la subida a propósito.</td>
+          <td>Incluirla o anularla</td>
+        </tr>
+        <tr>
+          <td><span class="etiqueta e-rechazada">RECHAZADA</span></td>
+          <td>El servidor no la aceptó y no la va a aceptar. Se muestra el motivo.</td>
+          <td>Revisar y descartar</td>
+        </tr>
+        <tr>
+          <td><span class="etiqueta e-anulada">ANULADA</span></td>
+          <td>Se anuló en taquilla. No se sube. Queda como registro.</td>
+          <td>Nada</td>
+        </tr>
+        <tr>
+          <td><span class="etiqueta e-ok">SINCRONIZADA</span></td>
+          <td>Ya está en el servidor. Sale de la lista.</td>
+          <td>Nada</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>6. Las acciones sobre una venta</h2>
+
+    <h3>No subir / Incluir en la subida</h3>
+    <p>
+      Saca una venta de la cola sin borrarla, o la devuelve. Sirve para dejar una venta dudosa
+      aparte mientras se sube el resto.
+    </p>
+
+    <div class="aviso atencion">
+      <span class="titulo">Retener no cancela nada</span>
+      <p>
+        El dinero sigue cobrado y fuera del sistema, así que una venta retenida
+        <strong>sigue bloqueando el cierre de caja</strong>. Es una decisión sobre
+        <em>cuándo</em> subirla, no sobre <em>si</em> subirla.
+      </p>
+    </div>
+
+    <h3>Anular</h3>
+    <p>
+      Para una venta que no debió hacerse: el visitante desistió, se cobró mal, se emitió por error.
+      Pide un motivo opcional y queda registrada con la fecha y el usuario que la anuló.
+    </p>
+    <p>Al anular:</p>
+    <ul>
+      <li>La venta <strong>no se sube nunca</strong> al servidor.</li>
+      <li>Su folio se declara como no utilizado al conciliar el lote.</li>
+      <li>
+        A partir de ese momento, <strong>el pase impreso deja de servir para entrar</strong>: si
+        alguien lo escanea en la puerta, se rechaza.
+      </li>
+      <li>En la caja no entra ni sale dinero.</li>
+      <li>Deja de bloquear el cierre de caja: no hay nada que liquidar.</li>
+    </ul>
+
+    <div class="aviso grave">
+      <span class="titulo">No se puede anular un pase ya usado</span>
+      <p>
+        Si el visitante ya ingresó con ese pase, el sistema no deja anularlo. Dejaría a una persona
+        adentro sin ningún ticket que respalde su entrada, que es peor que el cobro que se quería
+        revertir.
+      </p>
+    </div>
+
+    <h3>Descartar</h3>
+    <p>
+      Solo aparece en las ventas rechazadas. Borra la venta del dispositivo. Se usa cuando el
+      servidor no la va a aceptar nunca y ya no tiene sentido conservarla.
+    </p>
+
+    <div class="aviso grave">
+      <span class="titulo">Descartar deja un faltante en la caja</span>
+      <p>
+        El cobro ya ocurrió y al borrarlo pierde todo respaldo en el sistema: ese dinero va a
+        aparecer como faltante en el arqueo. Anótelo en las observaciones del cierre antes de
+        confirmar.
+      </p>
+    </div>
+
+    <h2>7. Subida automática</h2>
+
+    <p>
+      El interruptor de la cola controla si las ventas suben solas al recuperar la señal. Viene
+      activado.
+    </p>
+    <p>
+      Apagarlo sirve para revisar la cola antes de mandarla, o cuando la conexión es tan
+      intermitente que conviene elegir el momento. Con el automático apagado, nada sube hasta que
+      alguien pulse <strong>Subir ahora</strong>.
+    </p>
+
+    <div class="aviso">
+      <span class="titulo">Subir es seguro de reintentar</span>
+      <p>
+        Cada venta lleva un identificador propio. Si una subida se corta a la mitad y no se sabe si
+        llegó, se puede reintentar sin miedo: el servidor reconoce la repetida y no cobra dos veces.
+      </p>
+    </div>
+
+    <h2 class="salto">8. Diagnóstico del dispositivo</h2>
+
+    <p>
+      El último bloque muestra datos técnicos. Sirven para revisar cuando algo no funciona como se
+      espera, o para leérselos a quien dé soporte.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 32%">Dato</th>
+          <th>Qué mirar</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Última sincronización</td>
+          <td>Cuándo subió algo por última vez.</td>
+        </tr>
+        <tr>
+          <td>Almacenamiento seguro</td>
+          <td>
+            Debe decir <em>Disponible</em>. Si no, la aplicación se abrió por una dirección
+            insegura y el modo sin conexión no va a funcionar.
+          </td>
+        </tr>
+        <tr>
+          <td>Folios desbloqueados</td>
+          <td>
+            Debe decir <em>Sí</em>. Si dice que no, hay que cerrar sesión y volver a entrar.
+          </td>
+        </tr>
+        <tr>
+          <td>Modo sin conexión</td>
+          <td>Si el navegador soporta trabajar sin señal.</td>
+        </tr>
+        <tr>
+          <td>Identificador del dispositivo</td>
+          <td>El código con el que el servidor reconoce esta tablet.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="aviso atencion">
+      <span class="titulo">Recargar la página bloquea los folios</span>
+      <p>
+        La llave que descifra los folios se arma al iniciar sesión y vive solo mientras la pantalla
+        está abierta. Al recargar se pierde, y hasta que alguien vuelva a iniciar sesión no se puede
+        vender sin conexión.
+      </p>
+      <p>
+        Es a propósito: es lo que hace que una tablet robada no sirva para imprimir entradas. Pero
+        significa que recargar no alcanza para dejar el turno listo — hay que iniciar sesión.
+      </p>
+    </div>
+
+    <h2>9. Situaciones frecuentes</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 38%">Qué pasa</th>
+          <th>Qué hacer</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Aviso de que quedan pocos folios</td>
+          <td>
+            Llevar el dispositivo a donde haya señal. Se reponen solos; si urge, pulsar Reponer.
+          </td>
+        </tr>
+        <tr>
+          <td>No se puede vender: sin folios</td>
+          <td>
+            Hace falta internet. No hay forma de emitir un pase válido sin folios. La venta se
+            aborta sin cobrar.
+          </td>
+        </tr>
+        <tr>
+          <td>La caja no cierra</td>
+          <td>
+            Quedan ventas por subir o retenidas. Resolverlas desde esta pantalla y volver a
+            intentar.
+          </td>
+        </tr>
+        <tr>
+          <td>Una venta quedó rechazada</td>
+          <td>
+            Leer el motivo. Si dice que el folio ya se usó, ese cobro no va a poder registrarse:
+            anotarlo en el cierre y descartarla.
+          </td>
+        </tr>
+        <tr>
+          <td>Aviso de diferencia de tarifa</td>
+          <td>
+            Se cobró distinto del precio vigente. La venta entró igual; la diferencia aparece en el
+            arqueo para que un supervisor la revise.
+          </td>
+        </tr>
+        <tr>
+          <td>Sesión limitada a sincronización</td>
+          <td>
+            El usuario fue dado de baja mientras trabajaba sin señal. Solo puede subir y conciliar
+            lo pendiente. Terminar eso y avisar al supervisor.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="pie">
+      Parque Regional Municipal Actún Kan · ProPetén · Documento de operación interna.
+      El detalle técnico está en <code>ESPECIFICACION_OFFLINE.md</code> y en la sección 18 de
+      <code>DOCUMENTACION_ENDPOINTS.md</code>.
+    </div>
+  </body>
+</html>

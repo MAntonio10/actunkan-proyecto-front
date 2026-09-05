@@ -312,7 +312,7 @@ export function ModuloDonaciones() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="nombre-donante">Nombre del donante (opcional)</Label>
+                <Label htmlFor="nombre-donante">Nombre de la persona (opcional)</Label>
                 <Input
                   id="nombre-donante"
                   placeholder="Ej. Fundación Verde"

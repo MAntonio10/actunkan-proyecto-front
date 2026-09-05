@@ -35,7 +35,12 @@ import {
   TrendingDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
+import {
+  conciliarLoteActual,
+  descartarLoteLocal,
+  ErrorVentasPendientes,
+} from '@/lib/folios_offline'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
 import { HistorialCierresCaja } from '@/componentes/historial_cierres_caja'
 import { HistorialAperturasCaja } from '@/componentes/historial_aperturas_caja'
@@ -152,10 +157,35 @@ export default function CierreDiarioPage() {
     }
     setCerrando(true)
     try {
+      // Conciliar el lote de folios es requisito para cerrar la caja
+      // (DOCUMENTACION_ENDPOINTS.md 18.4). Se intenta antes para que el
+      // taquillero no se choque con un 409 que no sabe cómo resolver.
+      try {
+        await conciliarLoteActual()
+      } catch (errorLote) {
+        // Ventas cobradas sin subir: esto sí lo frena el frontend, porque
+        // cerrar dejaría dinero en el cajón sin ticket que lo respalde.
+        if (errorLote instanceof ErrorVentasPendientes) {
+          toast.error('Hay ventas sin conexión pendientes', {
+            description: errorLote.message,
+          })
+          setCerrando(false)
+          return
+        }
+        // Cualquier otro fallo no frena el cierre. El backend concilia solo los
+        // lotes vencidos de la caja, así que un "ya conciliado" acá es normal;
+        // si el lote sigue vigente, responderá 409 y se informa abajo.
+        console.warn('Conciliación previa al cierre:', errorLote)
+      }
+
       const res = await api.cajas.cerrar(cajaActual.id, {
         montoContado: monto,
         observaciones: observacionesCierre || undefined,
       })
+
+      // Con la caja cerrada, el lote de esa caja ya no sirve: o se concilió
+      // explícitamente arriba, o lo concilió el backend por vencimiento.
+      await descartarLoteLocal()
       const diferencia = aNumero(res.cierre?.diferencia)
       const detalleDif =
         diferencia === 0
@@ -169,6 +199,16 @@ export default function CierreDiarioPage() {
       await cargarTodo()
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : 'No se pudo cerrar la caja'
+      // 409: la caja tiene un lote de folios todavía vigente, así que puede
+      // haber otro dispositivo vendiendo contra ella. El vencido lo concilia el
+      // backend solo; este no, y con razón.
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error('Hay un lote de folios offline vigente', {
+          description:
+            'Otro dispositivo puede seguir vendiendo contra esta caja. Sincronice y concilie sus folios antes de cerrar.',
+        })
+        return
+      }
       toast.error('Error al cerrar la caja', { description: mensaje })
     } finally {
       setCerrando(false)

@@ -85,9 +85,11 @@ export function MenuModulos() {
   // token válido y ya viene filtrado por los permisos del usuario. No se usa
   // GET /modulos: responde 403 a quien no tenga Usuarios.Ver y dejaría sin
   // menú a un cajero.
-  const { modulosPermitidos: modulosMenu } = useAutenticacion();
+  const { modulosPermitidos: modulosMenu, enLinea } = useAutenticacion();
 
-  const modulosPermitidos = resolverModulosPermitidos(modulosMenu);
+  // Sin red solo quedan los módulos cuya pantalla está precacheada; el resto se
+  // oculta para no ofrecer un destino que el navegador no puede abrir.
+  const modulosPermitidos = resolverModulosPermitidos(modulosMenu, { enLinea });
 
   const contenidoMenu = (
     <motion.div

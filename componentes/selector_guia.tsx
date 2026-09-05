@@ -31,7 +31,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, esErrorDeRed } from "@/lib/api";
+import { db } from "@/lib/db_tickets";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { type GuiaBackend } from "@/tipos";
 
@@ -41,13 +42,17 @@ interface Props {
 }
 
 export function SelectorGuia({ idSeleccionado, onSeleccionar }: Props) {
-  const { puedeAccion } = useAutenticacion();
+  const { puedeAccion, enLinea } = useAutenticacion();
   const puedeEditar = puedeAccion("EmisionTickets", "Editar");
   const puedeAnular = puedeAccion("EmisionTickets", "Anular");
-  const puedeGestionar = puedeEditar || puedeAnular;
+  // Corregir, dar de baja y reactivar escriben en el backend: sin red no hay
+  // forma de hacerlo, y ofrecerlo solo llevaría a un error después del intento.
+  const puedeGestionar = (puedeEditar || puedeAnular) && enLinea;
 
   const [guias, setGuias] = useState<GuiaBackend[]>([]);
   const [cargando, setCargando] = useState(false);
+  /** El listado viene del dispositivo: puede no incluir altas recientes. */
+  const [desdeCache, setDesdeCache] = useState(false);
   const [abierto, setAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [busquedaAplicada, setBusquedaAplicada] = useState("");
@@ -76,11 +81,35 @@ export function SelectorGuia({ idSeleccionado, onSeleccionar }: Props) {
           buscar: busquedaAplicada || undefined,
           incluirAnulados: conAnulados || undefined,
         });
-        setGuias(Array.isArray(res) ? res : []);
+        const lista = Array.isArray(res) ? res : [];
+        setGuias(lista);
+        setDesdeCache(false);
+
+        // Se cachea solo el listado completo y sin filtros: guardar un
+        // resultado de búsqueda dejaría el caché con tres guías y el resto
+        // invisible la próxima vez que se caiga la red.
+        if (!busquedaAplicada && !conAnulados) {
+          await db.transaction("rw", db.guias, async () => {
+            await db.guias.clear();
+            await db.guias.bulkPut(lista);
+          });
+        }
       } catch (err: unknown) {
+        // Sin red se resuelve contra el catálogo guardado. La búsqueda, que
+        // normalmente hace el servidor, se aplica acá sobre esa lista.
+        if (esErrorDeRed(err)) {
+          const cache = await db.guias.toArray();
+          const texto = busquedaAplicada.trim().toLowerCase();
+          setGuias(
+            texto ? cache.filter((g) => g.nombre.toLowerCase().includes(texto)) : cache,
+          );
+          setDesdeCache(true);
+          return;
+        }
         const mensaje = err instanceof Error ? err.message : "No se pudieron cargar los guías";
         toast.error("Error al cargar guías", { description: mensaje });
         setGuias([]);
+        setDesdeCache(false);
       } finally {
         setCargando(false);
       }
@@ -233,6 +262,13 @@ export function SelectorGuia({ idSeleccionado, onSeleccionar }: Props) {
             />
           </div>
 
+          {desdeCache && (
+            <p className="px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/30">
+              Sin conexión: lista guardada en este dispositivo. Un guía dado de alta hoy en otra
+              taquilla puede no aparecer — regístrelo con “+ Crear Guía”.
+            </p>
+          )}
+
           <ScrollArea className="h-56">
             <div className="p-1">
               {cargando ? (
@@ -244,7 +280,9 @@ export function SelectorGuia({ idSeleccionado, onSeleccionar }: Props) {
                 <p className="text-sm text-muted-foreground text-center py-6 px-3">
                   {busquedaAplicada
                     ? "Ningún guía coincide con la búsqueda."
-                    : "No hay guías registrados. Use “+ Crear Guía” para registrar uno al emitir."}
+                    : desdeCache
+                      ? "No hay guías guardados en este dispositivo. Use “+ Crear Guía” para registrar uno al emitir."
+                      : "No hay guías registrados. Use “+ Crear Guía” para registrar uno al emitir."}
                 </p>
               ) : (
                 activos.map((g) => {

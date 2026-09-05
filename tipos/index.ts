@@ -925,6 +925,11 @@ export interface RespuestaTokens {
   token_type: string
   expires_in: string
   refresh_expira: string
+  /** El usuario fue dado de baja mientras su dispositivo estaba sin conexión.
+   *  El token solo sirve para subir y conciliar las ventas offline pendientes;
+   *  cualquier otro endpoint responde 401. Ver DOCUMENTACION_ENDPOINTS.md 18.6. */
+  solo_sincronizacion?: boolean
+  aviso?: string
 }
 
 export interface RespuestaLogin extends RespuestaTokens {
@@ -1041,6 +1046,9 @@ export interface TicketBackend {
   anulado?: boolean
   visitantePorTickets?: VisitantePorTicket[]
   ticketPagos?: TicketPago[]
+  // Emitido sin conexión y todavía no confirmado por el backend. Su `id` es
+  // local y negativo: no sirve para pedir el PDF ni para anular.
+  origenOffline?: boolean
   // Pasarela de Pagos (Recurrente / Tarjeta)
   estadoPago?: 'PENDIENTE' | 'PAGADO' | 'CANCELADO' | string
   checkoutUrl?: string | null
@@ -1313,3 +1321,292 @@ export interface FiltrosCierres {
   limite?: number
 }
 
+
+// ==========================================
+// Actividades del Parque (módulo ActividadesParque)
+// ==========================================
+
+// La autoría manda sobre el permiso: editar, anular y administrar imágenes son
+// exclusivos del autor, aunque otro usuario tenga la acción concedida.
+// Catálogo gobernado por el módulo ActividadesParque, no por uno propio.
+// Anular un sector lo retira del selector, pero las actividades ya publicadas
+// conservan el suyo.
+export interface SectorParqueBackend {
+  id: number
+  nombre: string
+  anulado?: boolean
+  fechaCreacion?: string
+  fechaActualizacion?: string
+  _count?: { actividades: number }
+}
+
+export interface ImagenActividad {
+  id: number
+  archivo: string
+  nombreOriginal: string
+  mimeType: string
+  tamanoBytes?: number
+  orden: number
+}
+
+export interface ActividadParqueBackend {
+  id: number
+  idUsuarioAutor: number
+  idUsuarioResponsable?: number | null
+  idSectorParque?: number | null
+  nombreActividad: string
+  descripcionActividad: string
+  fechaInicio: string
+  /** Sin fechaFin la publicación no expira. */
+  fechaFin?: string | null
+  fechaCreacion: string
+  fechaActualizacion?: string
+  anulado: boolean
+
+  // Calculados por el servidor: no recalcular comparando fechas en el cliente,
+  // porque se evalúan contra la hora real del servidor.
+  vigente: boolean
+  expirada: boolean
+  programada: boolean
+  /** Ayuda para la interfaz; el servidor igual verifica la autoría. */
+  esAutor: boolean
+
+  autor?: { id: number; nombre: string; correo?: string }
+  responsable?: { id: number; nombre: string; correo?: string } | null
+  sector?: SectorParqueBackend | null
+  imagenes?: ImagenActividad[]
+}
+
+export interface PayloadActividad {
+  nombreActividad: string
+  descripcionActividad: string
+  fechaInicio: string
+  /** null quita la expiración; undefined la deja como está. */
+  fechaFin?: string | null
+  idSectorParque?: number | null
+  idUsuarioResponsable?: number | null
+}
+
+export interface FiltrosActividades {
+  buscar?: string
+  idSectorParque?: number
+  idUsuarioAutor?: number
+  soloMias?: boolean
+  /** Solo aplica a las propias: las ajenas expiradas nunca se muestran. */
+  incluirExpiradas?: boolean
+  incluirAnuladas?: boolean
+  /** Papelera: solo las anuladas. Tiene prioridad sobre incluirAnuladas. */
+  soloAnuladas?: boolean
+  pagina?: number
+  limite?: number
+}
+
+export interface RespuestaHistorialActividades {
+  datos: ActividadParqueBackend[]
+  total: number
+  pagina: number
+  limite: number
+}
+
+// ==========================================
+// Emisión offline (módulo EmisionTickets)
+// ==========================================
+// Contrato completo en ESPECIFICACION_OFFLINE.md. La taquilla reserva folios
+// pre-firmados mientras hay red y los consume sin conexión: el visitante recibe
+// un QR válido en el momento de la venta, no cuando la venta logra subir.
+
+/** Folio reservado. `qr` es la cadena exacta a codificar; la arma el servidor
+ *  para que el frontend no tenga que replicar el formato. */
+export interface FolioReservado {
+  numeroTicket: string
+  firma: string
+  qr: string
+}
+
+export type EstadoLoteOffline = 'ACTIVO' | 'CONCILIADO' | 'INVALIDADO'
+
+export interface LoteOfflineBackend {
+  idLote: number
+  idAperturaCaja: number
+  idUsuario: number
+  idDispositivo: string
+  estado: EstadoLoteOffline
+  fechaCreacion: string
+  expiraEn: string
+  /** Vencido. Sus folios siguen en RESERVADO y las ventas pendientes todavía
+   *  pueden subirse, pero ya no bloquea reservar un lote nuevo. */
+  expirado?: boolean
+  folios: FolioReservado[]
+}
+
+export interface RespuestaLoteActivo {
+  hayLoteActivo: boolean
+  lote: LoteOfflineBackend | null
+}
+
+/** Una venta hecha sin conexión, tal como se sube. Extiende el payload normal
+ *  de emisión con lo que el servidor no puede deducir después: qué folio se
+ *  usó, cuándo se vendió y cuánto entró de verdad al cajón. */
+export interface VentaOffline extends PayloadEmisionTicket {
+  /** UUID generado en el dispositivo. Clave de idempotencia: reintentar con el
+   *  mismo valor devuelve el ticket ya creado en vez de duplicarlo. */
+  idLocal: string
+  numeroTicket: string
+  /** Solo cuando hay guía sin carnet, que consume un segundo folio. */
+  numeroTicketGuia?: string
+  fechaEmision: string
+  montoCobrado: string
+}
+// No agregue campos acá sin que existan en DOCUMENTACION_ENDPOINTS.md 18.3. El
+// ValidationPipe del backend usa `forbidNonWhitelisted`: un solo campo de más
+// devuelve 400 y tumba la tanda entera, hasta 50 ventas ya cobradas.
+// En particular, el ingreso validado sin conexión NO viaja acá: se sella con
+// POST /tickets/validar, que además verifica la firma, rechaza reingresos con
+// 409 y deja rastro en Bitácora. Aceptar una fecha de uso enviada por el
+// dispositivo pondría el control de acceso en manos del cliente.
+
+export type EstadoResultadoVenta = 'CREADO' | 'DUPLICADO_IGNORADO' | 'RECHAZADO'
+
+export type CodigoRechazoVenta =
+  | 'FOLIO_NO_RESERVADO'
+  /** El dispositivo gastó dos veces el mismo folio: hay una venta cobrada que
+   *  se pierde. Es el rechazo más grave; exige revisión humana. */
+  | 'FOLIO_YA_EMITIDO'
+  | 'FOLIO_DE_OTRO_LOTE'
+  | 'LOTE_INVALIDADO'
+  | 'PAGO_NO_EFECTIVO'
+  | 'CATALOGO_INVALIDO'
+
+/** Lo cobrado en taquilla no coincide con la tarifa vigente en `fechaEmision`.
+ *  La venta se registra igual; la diferencia queda visible en el arqueo. */
+export interface DiscrepanciaMonto {
+  montoCobrado: string
+  montoRecalculado: string
+  diferencia: string
+}
+
+export interface ResultadoVentaOffline {
+  idLocal: string
+  estado: EstadoResultadoVenta
+  ticket?: TicketBackend
+  codigo?: CodigoRechazoVenta
+  mensaje?: string
+  discrepancia?: DiscrepanciaMonto | null
+}
+
+/** Éxito parcial: una venta rechazada no arrastra a las demás del lote. */
+export interface RespuestaEmisionOffline {
+  procesadas: number
+  resultados: ResultadoVentaOffline[]
+}
+
+export interface AdvertenciaConciliacion {
+  numeroTicket: string
+  detalle: string
+}
+
+export interface RespuestaConciliacionLote {
+  idLote: number
+  estado: EstadoLoteOffline
+  emitidos: number
+  noUtilizados: number
+  advertencias: AdvertenciaConciliacion[]
+}
+
+// ---- Estructuras locales (Dexie). No viajan al backend tal cual. ----
+
+export type EstadoVentaLocal =
+  | 'pendiente'
+  /** El operador decidió no subirla por ahora. Sigue siendo dinero cobrado que
+   *  no está en el sistema, así que bloquea el cierre de caja igual que una
+   *  pendiente; la diferencia es que la cola la salta en vez de reintentarla. */
+  | 'retenida'
+  | 'enviando'
+  | 'sincronizada'
+  | 'rechazada'
+  /** Anulada en taquilla antes de subirse. Estado terminal y local: la venta
+   *  nunca viaja al servidor. Su folio se declara no utilizado al conciliar, lo
+   *  que lo cierra del lado del backend y hace que el pase deje de validar. */
+  | 'anulada'
+
+/** Fila de la cola de subida. Guarda además lo necesario para imprimir el pase
+ *  y para mostrar el historial sin conexión, que el backend todavía no conoce. */
+export interface VentaPendienteLocal {
+  idLocal: string
+  venta: VentaOffline
+  estado: EstadoVentaLocal
+  intentos: number
+  ultimoError?: string
+  codigoRechazo?: CodigoRechazoVenta
+  /** Devuelta por el backend al subir: se cobró distinto de la tarifa vigente. */
+  discrepancia?: DiscrepanciaMonto | null
+  idLote: number
+  /** Folios consumidos: uno, o dos si hubo guía sin carnet. */
+  folios: FolioReservado[]
+  /** Etiquetas resueltas desde catálogos al vender, para el historial offline. */
+  resumen: {
+    nombreGrupo: string
+    atraccion: string
+    totalPersonas: number
+    montoTotal: string
+  }
+  /**
+   * Datos de la anulación hecha en taquilla. La venta no se sube: sin ticket en
+   * el servidor no hay nada que dar de baja, así que tampoco hace falta el
+   * permiso `EmisionTickets / Anular`, que un taquillero normalmente no tiene.
+   *
+   * El folio consumido se declara **no utilizado** al conciliar el lote. Eso lo
+   * cierra del lado del backend, deja la numeración sin huecos sin explicar y
+   * hace que `POST /tickets/validar` responda 404: el pase impreso deja de
+   * servir para entrar. En la caja no entró ni salió dinero.
+   */
+  fechaAnulacion?: string
+  motivoAnulacion?: string
+  usuarioAnulacion?: string
+  /** Sellado localmente si el pase se validó en la puerta sin conexión. */
+  fechaUsoLocal?: string
+  /** El uso ya quedó registrado en el backend. Distingue el caso de un pase que
+   *  se validó después de que su venta ya había subido: ahí el sello viaja por
+   *  `POST /tickets/validar`, no dentro de la venta. */
+  usoSincronizado?: boolean
+  fechaCreacion: string
+  fechaSincronizacion?: string
+}
+
+/**
+ * Ticket que existe solo en este dispositivo porque su venta todavía no subió.
+ * Se mezcla con el historial del backend para que el taquillero vea la jornada
+ * completa; el campo extra es lo que permite marcarlo como local en la tabla.
+ */
+export interface TicketLocalNoSincronizado extends TicketBackend {
+  estadoSincronizacion: Exclude<EstadoVentaLocal, 'sincronizada'>
+  motivoRechazo?: string
+}
+
+/** Verificador de contraseña para iniciar sesión sin conexión. Nunca guarda la
+ *  contraseña: solo el digest PBKDF2 y su salt. La misma derivación produce la
+ *  llave que cifra el refresh token y los folios. */
+export interface CredencialOffline {
+  correo: string
+  idUsuario: number
+  /** Base64. */
+  saltVerificador: string
+  /** Base64 del digest PBKDF2 de la contraseña. */
+  digest: string
+  iteraciones: number
+  /** Base64. Salt separado para la llave AES-GCM, nunca el mismo del digest. */
+  saltLlave: string
+  usuario: UsuarioBackend
+  modulosPermitidos: ModuloMenu[]
+  /** Vencida la ventana offline, se exige entrar con conexión. */
+  fechaUltimoLoginOnline: string
+  intentosFallidos: number
+  bloqueada: boolean
+}
+
+/** Blob cifrado con AES-GCM bajo la llave derivada de la contraseña. */
+export interface SecretoCifrado {
+  clave: string
+  iv: string
+  datos: string
+}

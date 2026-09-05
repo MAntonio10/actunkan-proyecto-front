@@ -6,6 +6,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Permitir conexión y Hot Module Reload (HMR) desde dispositivos en la red local
+  allowedDevOrigins: [
+    '192.168.31.104',
+    'localhost',
+    '127.0.0.1',
+    '0.0.0.0',
+  ],
   // Redirección HTTP automática a nivel de servidor hacia /login
   async redirects() {
     return [

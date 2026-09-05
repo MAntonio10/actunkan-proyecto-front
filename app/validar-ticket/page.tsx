@@ -22,7 +22,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
-import { api, ApiError } from '@/lib/api'
+import { api, ApiError, esErrorDeRed } from '@/lib/api'
+import { validarSinConexion } from '@/lib/validacion_offline'
 import { type TicketBackend } from '@/tipos'
 
 type EstadoResultado = 'autorizado' | 'firma_invalida' | 'no_existe' | 'rechazado' | 'error'
@@ -97,6 +98,27 @@ export default function ValidarTicketPage() {
         ticket: res.ticket,
       })
     } catch (err: unknown) {
+      // Sin red se resuelve contra lo vendido por este dispositivo. Un pase
+      // emitido offline todavía figura como folio reservado en el servidor, así
+      // que preguntarle daría 404 y dejaría afuera a un visitante que ya pagó.
+      if (esErrorDeRed(err)) {
+        const local = await validarSinConexion(numeroTicket)
+        if (local.estado === 'desconocido') {
+          setResultado({
+            estado: 'error',
+            mensaje:
+              'Sin conexión y este pase no se vendió desde este dispositivo. No se puede verificar hasta recuperar internet.',
+          })
+        } else {
+          setResultado({
+            estado: local.estado === 'autorizado' ? 'autorizado' : 'rechazado',
+            mensaje: local.mensaje,
+            ticket: local.ticket,
+          })
+        }
+        return
+      }
+
       const status = err instanceof ApiError ? err.status : undefined
       const mensaje = err instanceof Error ? err.message : 'No se pudo validar el ticket'
       const estado: EstadoResultado =
