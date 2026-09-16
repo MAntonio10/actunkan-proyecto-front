@@ -14,7 +14,7 @@
  * explícito y está fechado.
  */
 
-const VERSION = 'actunkan-v5'
+const VERSION = 'actunkan-v7'
 const CACHE_SHELL = `${VERSION}-shell`
 const CACHE_ESTATICOS = `${VERSION}-estaticos`
 const PAGINA_SIN_CONEXION = '/sin-conexion.html'
@@ -45,6 +45,9 @@ const OTROS_RECURSOS = [
   '/manifest.json',
   '/actun.png',
   '/Propeten.png',
+  // El fondo del sistema. Sin el, las pantallas sin conexion se ven con un
+  // hueco de color plano donde el resto de la aplicacion tiene el mapa.
+  '/fondo-sistema-1920.webp',
   '/icon.svg',
   '/icon-192x192.png',
   '/icon-512x512.png',
@@ -100,7 +103,7 @@ self.addEventListener('activate', (evento) => {
 function esLlamadaApi(url) {
   return (
     url.origin !== self.location.origin ||
-    /^\/(auth|tickets|usuarios|puestos|modulos|acciones|modulo-acciones|bitacora|tarifas|guias|cajas|gastos|tipos-gasto|donaciones|actividades|sectores|pagos)(\/|$)/.test(
+    /^\/(auth|tickets|usuarios|puestos|modulos|acciones|modulo-acciones|bitacora|tarifas|guias|cajas|gastos|tipos-gasto|donaciones|actividades|sectores|reportes|pagos)(\/|$)/.test(
       url.pathname,
     )
   )
@@ -116,10 +119,30 @@ function esPeticionRsc(peticion, url) {
   return url.searchParams.has('_rsc') || peticion.headers.get('RSC') === '1'
 }
 
-/** Los estáticos de Next llevan hash en el nombre: un archivo dado nunca cambia
- *  de contenido, así que la caché no se puede quedar vieja. */
+/** Ruta de los estáticos de Next. Que sean inmutables lo decide la respuesta,
+ *  no la ruta: ver `sePuedeGuardarComoInmutable`. */
 function esEstaticoInmutable(url) {
   return url.pathname.startsWith('/_next/static/')
+}
+
+/**
+ * ¿Esta respuesta se puede guardar para siempre?
+ *
+ * Con `next build` el nombre de cada archivo lleva un hash de su contenido y el
+ * servidor lo declara `immutable`: guardarlo sin fecha de vencimiento es
+ * correcto. Con `next dev` **no**: Turbopack reutiliza el nombre del chunk
+ * aunque el contenido cambie, y lo sirve con `no-cache`. Guardar eso mezclaba
+ * una pantalla recién compilada con módulos viejos, y la aplicación fallaba con
+ * errores que no se corresponden con el código en disco.
+ *
+ * Por eso se pregunta a la cabecera en vez de suponerlo por la ruta.
+ */
+function sePuedeGuardarComoInmutable(respuesta) {
+  const control = respuesta.headers.get('cache-control') || ''
+  if (/no-store|no-cache/i.test(control)) return false
+  if (/immutable/i.test(control)) return true
+  const maxima = control.match(/max-age=(\d+)/i)
+  return maxima ? Number(maxima[1]) >= 3600 : false
 }
 
 /** Red primero y caché como respaldo. Al revés, un despliegue nuevo tardaría en
@@ -202,7 +225,9 @@ self.addEventListener('fetch', (evento) => {
         const guardado = await cache.match(peticion)
         if (guardado) return guardado
         const respuesta = await fetch(peticion)
-        if (respuesta.ok) cache.put(peticion, respuesta.clone())
+        if (respuesta.ok && sePuedeGuardarComoInmutable(respuesta)) {
+          cache.put(peticion, respuesta.clone())
+        }
         return respuesta
       })(),
     )

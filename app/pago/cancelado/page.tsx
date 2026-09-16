@@ -15,7 +15,7 @@ import { LogosInstitucionales } from '@/componentes/logos_institucionales'
 
 export default function PaginaPagoCancelado() {
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
       {/* Fondo ambiental sutil */}
       <div
         aria-hidden
@@ -41,7 +41,7 @@ export default function PaginaPagoCancelado() {
 
       {/* Tarjeta de Cancelación */}
       <main className="w-full flex justify-center">
-        <Card className="w-full max-w-lg bg-card/90 backdrop-blur-md border-border/70 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+        <Card className="w-full max-w-lg bg-card border-border/70 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
           <CardHeader className="text-center pb-2 pt-6">
             <div className="h-20 w-20 rounded-full bg-muted text-muted-foreground flex items-center justify-center mx-auto mb-2 ring-8 ring-muted/40">
               <XCircle className="h-12 w-12 text-muted-foreground" />
@@ -72,7 +72,7 @@ export default function PaginaPagoCancelado() {
                 Opciones alternativas de pago
               </span>
 
-              <div className="rounded-xl border border-border/60 p-3 flex items-center gap-3 bg-card/60">
+              <div className="rounded-xl border border-border/60 p-3 flex items-center gap-3 bg-card">
                 <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                   <Banknote className="h-5 w-5" />
                 </div>
@@ -82,7 +82,7 @@ export default function PaginaPagoCancelado() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border/60 p-3 flex items-center gap-3 bg-card/60">
+              <div className="rounded-xl border border-border/60 p-3 flex items-center gap-3 bg-card">
                 <div className="h-9 w-9 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                   <CreditCard className="h-5 w-5" />
                 </div>

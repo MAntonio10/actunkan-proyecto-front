@@ -1,5 +1,6 @@
 import {
   UsuarioBackend,
+  RespuestaUsuarios,
   PuestoBackend,
   ModuloBackend,
   ModuloMenu,
@@ -9,6 +10,7 @@ import {
   RespuestaTokens,
   SesionBackend,
   BitacoraBackend,
+  RespuestaBitacora,
   FiltrosBitacora,
   CatalogosTickets,
   PayloadEmisionTicket,
@@ -18,8 +20,11 @@ import {
   TicketBackend,
   FiltrosTickets,
   TarifaBackend,
+  RespuestaHistorialTarifas,
   GuiaBackend,
+  RespuestaGuias,
   AperturaCajaBackend,
+  RespuestaAperturasCajas,
   RespuestaCajaActual,
   ArqueoCaja,
   RespuestaCierreCaja,
@@ -44,9 +49,17 @@ import {
   VentaOffline,
   RespuestaEmisionOffline,
   RespuestaConciliacionLote,
+  RespuestaCatalogoReportes,
+  ResultadoReporte,
+  RespuestaInterpretacionReporte,
+  Dashboard,
 } from '@/tipos'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+
+/** El xlsx que devuelven las rutas de reportes. */
+const TIPO_EXCEL =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 // Rutas que el backend expone sin token. El resto de /auth/* (logout-todas,
 // sesiones) sí exige sesión, por eso no basta con mirar el prefijo /auth/.
@@ -359,6 +372,31 @@ async function solicitarBlob(endpoint: string, accept = 'application/pdf'): Prom
   return response.blob()
 }
 
+/** Archivo binario junto al nombre que propuso el servidor. */
+export interface ArchivoDescargado {
+  blob: Blob
+  /** De `Content-Disposition`. Null si la cabecera no llegó (ver abajo). */
+  nombreArchivo: string | null
+}
+
+/**
+ * Igual que `solicitarBlob`, pero conservando el nombre de archivo.
+ *
+ * Lo usa el Excel de reportes, que viaja como `attachment` y necesita un nombre
+ * al guardarse. Entre dominios la cabecera solo se lee si el backend la publica
+ * con `Access-Control-Expose-Headers`; por eso el llamador siempre tiene que
+ * traer un nombre de respaldo en vez de confiar en que venga.
+ */
+async function solicitarArchivo(
+  endpoint: string,
+  accept: string,
+): Promise<ArchivoDescargado> {
+  const response = await ejecutarConAuth(endpoint, { headers: { Accept: accept } })
+  const disposicion = response.headers.get('content-disposition') ?? ''
+  const coincidencia = disposicion.match(/filename="?([^";]+)"?/i)
+  return { blob: await response.blob(), nombreArchivo: coincidencia?.[1] ?? null }
+}
+
 export const api = {
   // 1. Autenticación
   auth: {
@@ -415,8 +453,17 @@ export const api = {
 
   // 2. Usuarios
   usuarios: {
-    getUsuarios: (incluirAnulados: boolean = true) =>
-      request<UsuarioBackend[]>(`/usuarios${incluirAnulados ? '?incluirAnulados=true' : ''}`),
+    // Paginado. `/usuarios` valida su query con un DTO (`forbidNonWhitelisted`):
+    // los únicos parámetros aceptados son `incluirAnulados`, `pagina` y
+    // `limite`; cualquier otro responde 400.
+    getUsuarios: (incluirAnulados: boolean = true, params?: { pagina?: number; limite?: number }) => {
+      const queryParams = new URLSearchParams()
+      if (incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
+      const queryStr = queryParams.toString()
+      return request<RespuestaUsuarios>(`/usuarios${queryStr ? `?${queryStr}` : ''}`)
+    },
 
     getUsuarioById: (id: number) => request<UsuarioBackend>(`/usuarios/${id}`),
 
@@ -581,9 +628,10 @@ export const api = {
       if (params?.accion) queryParams.append('accion', params.accion)
       if (params?.fechaInicio) queryParams.append('fechaInicio', params.fechaInicio)
       if (params?.fechaFin) queryParams.append('fechaFin', params.fechaFin)
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
       if (params?.limite) queryParams.append('limite', String(params.limite))
       const queryStr = queryParams.toString()
-      return request<BitacoraBackend[]>(`/bitacora${queryStr ? `?${queryStr}` : ''}`)
+      return request<RespuestaBitacora>(`/bitacora${queryStr ? `?${queryStr}` : ''}`)
     },
 
     getBitacoraById: (id: number) => request<BitacoraBackend>(`/bitacora/${id}`),
@@ -622,6 +670,20 @@ export const api = {
     // El backend arma el pase en PDF (Content-Disposition: inline) para
     // previsualizar, imprimir o descargar desde el visor del navegador.
     getPdf: (id: number) => solicitarBlob(`/tickets/${id}/pdf`),
+
+    /**
+     * Manda al cliente su enlace de pago por correo.
+     *
+     * Solo viaja la dirección: el enlace lo pone el servidor leyéndolo del pago
+     * guardado, así que este endpoint no sirve para mandar una URL cualquiera a
+     * nombre del parque. Responde 400 si el ticket está anulado, ya pagado o
+     * fue en efectivo.
+     */
+    enviarEnlacePago: (id: number, correo: string) =>
+      request<{ mensaje: string; numeroTicket: string; correo: string }>(
+        `/tickets/${id}/enviar-enlace-pago`,
+        { method: 'POST', body: JSON.stringify({ correo }) },
+      ),
 
     anular: (id: number) =>
       request<TicketBackend>(`/tickets/${id}`, {
@@ -681,12 +743,22 @@ export const api = {
   // 9. Guías (módulo EmisionTickets)
   // Sin alta propia: el guía nuevo se crea dentro de POST /tickets/emitir.
   guias: {
-    listar: (params?: { buscar?: string; incluirAnulados?: boolean }) => {
+    // Paginado. Igual que `/usuarios`, valida la query con un DTO: solo acepta
+    // `buscar`, `incluirAnulados`, `pagina` y `limite`.
+    listar: (params?: {
+      buscar?: string
+      incluirAnulados?: boolean
+      pagina?: number
+      /** Tope del backend: 200. */
+      limite?: number
+    }) => {
       const queryParams = new URLSearchParams()
       if (params?.buscar) queryParams.append('buscar', params.buscar)
       if (params?.incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
       const queryStr = queryParams.toString()
-      return request<GuiaBackend[]>(`/guias${queryStr ? `?${queryStr}` : ''}`)
+      return request<RespuestaGuias>(`/guias${queryStr ? `?${queryStr}` : ''}`)
     },
 
     getById: (id: number) => request<GuiaBackend>(`/guias/${id}`),
@@ -719,12 +791,25 @@ export const api = {
   tarifas: {
     getTarifas: () => request<TarifaBackend[]>('/tarifas'),
 
-    getHistorico: (params?: { idAtraccion?: number; idOrigen?: number }) => {
+    // Paginado. `getTarifas` (las vigentes) NO lo está: sigue siendo arreglo
+    // plano. Valida la query con un DTO: solo `idAtraccion`, `idOrigen`,
+    // `pagina` y `limite`.
+    getHistorico: (params?: {
+      idAtraccion?: number
+      idOrigen?: number
+      pagina?: number
+      /** Tope del backend: 200. */
+      limite?: number
+    }) => {
       const queryParams = new URLSearchParams()
       if (params?.idAtraccion) queryParams.append('idAtraccion', String(params.idAtraccion))
       if (params?.idOrigen) queryParams.append('idOrigen', String(params.idOrigen))
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
       const queryStr = queryParams.toString()
-      return request<TarifaBackend[]>(`/tarifas/historico${queryStr ? `?${queryStr}` : ''}`)
+      return request<RespuestaHistorialTarifas>(
+        `/tarifas/historico${queryStr ? `?${queryStr}` : ''}`
+      )
     },
 
     getTarifaGuia: () => request<{ precio: string }>('/tarifas/guia'),
@@ -763,8 +848,10 @@ export const api = {
       if (params?.fechaInicio) queryParams.append('fechaInicio', params.fechaInicio)
       if (params?.fechaFin) queryParams.append('fechaFin', params.fechaFin)
       if (params?.incluirAnulados) queryParams.append('incluirAnulados', 'true')
+      if (params?.pagina) queryParams.append('pagina', String(params.pagina))
+      if (params?.limite) queryParams.append('limite', String(params.limite))
       const queryStr = queryParams.toString()
-      return request<AperturaCajaBackend[]>(`/cajas${queryStr ? `?${queryStr}` : ''}`)
+      return request<RespuestaAperturasCajas>(`/cajas${queryStr ? `?${queryStr}` : ''}`)
     },
 
     // Historial de cierres. Vista de supervisión: exige Cajas/Editar, no Ver.
@@ -1051,6 +1138,64 @@ export const api = {
     anular: (id: number) =>
       request<SectorParqueBackend>(`/sectores/${id}`, {
         method: 'DELETE',
+      }),
+  },
+
+  // 18. Reportes
+  // Dos vías que no hay que confundir (REPORTES_FRONTEND.md § 1): el catálogo
+  // —`catalogo` + `generar` + `descargar`— no sale a internet ni gasta cuota, y
+  // es contra la que pegan todos los botones. `interpretar` es la única que
+  // llama a la IA, y solo para elegir reporte y filtros.
+  reportes: {
+    /**
+     * Catálogo ya filtrado por los permisos del usuario. Es la primera llamada
+     * de la pantalla y la única fuente del menú: una lista escrita a mano
+     * ofrecería reportes que responderían 403.
+     */
+    catalogo: () => request<RespuestaCatalogoReportes>('/reportes'),
+
+    /**
+     * Panel de gráficas: series listas para dibujar, sin pasar por un reporte.
+     *
+     * Solo acepta fechas. Los paneles cuyos datos el usuario no puede ver no
+     * vienen vacíos: vienen declarados en `omitidos` con el motivo.
+     */
+    dashboard: (query = '') =>
+      request<Dashboard>(`/reportes/dashboard${query ? `?${query}` : ''}`),
+
+    /**
+     * Ejecuta un reporte del catálogo. `query` ya viene armada con los
+     * `parametros` que declara el catálogo — mandar uno que el reporte no
+     * declara devuelve 400.
+     */
+    generar: (clave: string, query = '') =>
+      request<ResultadoReporte>(`/reportes/${clave}${query ? `?${query}` : ''}`),
+
+    /**
+     * El mismo reporte como archivo. Exige `Reportes.Exportar`.
+     *
+     * Va por `fetch` y no por `window.open` ni un `<a href>`: la ruta pide
+     * `Authorization: Bearer` y una navegación del navegador no manda esa
+     * cabecera, así que esos dos atajos devuelven 401.
+     */
+    descargar: (clave: string, formato: 'pdf' | 'excel', query = '') =>
+      solicitarArchivo(
+        `/reportes/${clave}/${formato}${query ? `?${query}` : ''}`,
+        formato === 'pdf' ? 'application/pdf' : TIPO_EXCEL,
+      ),
+
+    /** Descarga por URL ya armada. La usa la vía a medida con `urlDescarga`. */
+    descargarPorUrl: (url: string) =>
+      solicitarArchivo(url, url.includes('/excel') ? TIPO_EXCEL : 'application/pdf'),
+
+    /**
+     * Traduce una petición escrita. Única ruta con IA: 15 por minuto, y solo
+     * debe dispararse desde un botón explícito, nunca al teclear.
+     */
+    interpretar: (instruccion: string) =>
+      request<RespuestaInterpretacionReporte>('/reportes/interpretar', {
+        method: 'POST',
+        body: JSON.stringify({ instruccion }),
       }),
   },
 }

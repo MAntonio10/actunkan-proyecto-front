@@ -163,7 +163,7 @@ export function CatalogoSectores({ onCambio }: Props) {
 
   return (
     <div className="space-y-6">
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -218,7 +218,7 @@ export function CatalogoSectores({ onCambio }: Props) {
                     "flex items-center justify-between gap-3 rounded-lg border p-3",
                     s.anulado
                       ? "border-border/40 bg-muted/30 opacity-70"
-                      : "border-border/60 bg-card/60",
+                      : "border-border/60 bg-card",
                   )}
                 >
                   <div className="min-w-0">

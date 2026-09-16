@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -43,6 +43,8 @@ import {
   ShieldAlert,
   Users,
   Activity,
+  ChevronLeft,
+  ChevronRight,
   UserCheck,
   Key,
   Info,
@@ -82,43 +84,102 @@ const OBTENER_ICONO_ACCION = (accion: string): React.ReactNode => {
   return <Activity className="h-4 w-4 text-muted-foreground" />
 }
 
+/**
+ * Tamaño de página. 200 es el tope de `/bitacora`; su valor por omisión es 100.
+ * Se pide el tope porque la búsqueda y el filtro por módulo de esta pantalla
+ * son del lado del cliente: cuantos más registros haya cargados, sobre más
+ * busca. Antes el backend topaba en 100 sin forma de pedir los siguientes; con
+ * `pagina` el resto del historial ya es alcanzable.
+ */
+const LIMITE = 200
+
+/**
+ * Módulos que aparecen en la bitácora.
+ *
+ * Escritos acá y no traídos de `GET /modulos` a propósito: el campo `modulo` de
+ * la bitácora lo escribe cada service como texto libre, no es una llave foránea,
+ * y los valores no coinciden con la tabla `Modulo`. Poblar el desplegable desde
+ * `/modulos` perdería `Tickets` -- el segundo en volumen -- y `Auth`, y a cambio
+ * ofrecería nueve módulos sin un solo registro que mostrar.
+ *
+ * Tampoco se arma solo con lo que trae la página cargada: en cuanto el filtro se
+ * resuelve en el servidor, elegir "Cajas" devuelve solo registros de Cajas, el
+ * desplegable se recalcularía a esa única opción y el usuario quedaría encerrado
+ * sin poder volver. Esta lista es el piso; lo que venga en la página se le suma
+ * (ver `modulosDisponibles`), así que un módulo nuevo aparece solo.
+ */
+const MODULOS_BITACORA = [
+  'ActividadesParque',
+  'Auth',
+  'Cajas',
+  'Donaciones',
+  'EmisionTickets',
+  'Gastos',
+  'Modulos',
+  'Reportes',
+  'Tarifas',
+  'Tickets',
+  'TiposGasto',
+  'Usuarios',
+]
+
 export default function BitacoraPage() {
   const [bitacora, setBitacora] = useState<BitacoraBackend[]>([])
+  const [total, setTotal] = useState<number>(0)
+  const [pagina, setPagina] = useState<number>(1)
   const [cargando, setCargando] = useState<boolean>(true)
   const [busqueda, setBusqueda] = useState<string>('')
   const [filtroModulo, setFiltroModulo] = useState<string>('todos')
   const [ordenAscendente, setOrdenAscendente] = useState<boolean>(false)
   const [registroDetalle, setRegistroDetalle] = useState<BitacoraBackend | null>(null)
 
-  const cargarBitacora = async () => {
+  // Las respuestas se descartan si ya salió otra petición después: pulsar
+  // "siguiente" dos veces seguidas puede devolver las páginas en desorden, y la
+  // que llegue tarde pintaría datos que no corresponden al paginador.
+  const peticionVigente = useRef(0)
+
+  const cargarBitacora = useCallback(async () => {
+    const idPeticion = ++peticionVigente.current
     setCargando(true)
     try {
-      const res = await api.bitacora.getBitacora({ limite: 200 })
-      if (Array.isArray(res)) {
-        setBitacora(res)
-      } else {
-        setBitacora([])
-      }
+      const res = await api.bitacora.getBitacora({
+        // El backend compara con `contains`, no con igualdad. Sobre los valores
+        // que existen hoy eso solapa un solo par: filtrar por "Tickets" trae
+        // además los de "EmisionTickets". Se acepta -- el resultado queda más
+        // amplio, no equivocado -- y se deja dicho acá para que no parezca un
+        // error cuando alguien lo note. Ningún otro par se solapa ("Gastos" no
+        // alcanza a "TiposGasto": esa cadena lleva "Gasto" en singular).
+        modulo: filtroModulo !== 'todos' ? filtroModulo : undefined,
+        pagina,
+        limite: LIMITE,
+      })
+      if (idPeticion !== peticionVigente.current) return
+      setBitacora(Array.isArray(res?.datos) ? res.datos : [])
+      setTotal(res?.total || 0)
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigente.current) return
       const msg = err instanceof Error ? err.message : 'Error al cargar bitacora'
       toast.error('Error al consultar bitacora', { description: msg })
       setBitacora([])
+      setTotal(0)
     } finally {
-      setCargando(false)
+      if (idPeticion === peticionVigente.current) setCargando(false)
     }
-  }
+  }, [pagina, filtroModulo])
 
   useEffect(() => {
     cargarBitacora()
-  }, [])
+  }, [cargarBitacora])
 
-  // Lista de módulos únicos presentes en los registros
+  // Los módulos conocidos más los que traiga la página, sin repetir. La unión es
+  // lo que evita que el desplegable se encierre al filtrar y, a la vez, deja
+  // aparecer uno nuevo sin tener que tocar la constante.
   const modulosDisponibles = useMemo(() => {
-    const setModulos = new Set<string>()
+    const setModulos = new Set<string>(MODULOS_BITACORA)
     bitacora.forEach((b) => {
       if (b.modulo) setModulos.add(b.modulo)
     })
-    return Array.from(setModulos)
+    return Array.from(setModulos).sort((a, b) => a.localeCompare(b, 'es'))
   }, [bitacora])
 
   // Filtrado y ordenamiento
@@ -137,27 +198,26 @@ export default function BitacoraPage() {
       )
     }
 
-    if (filtroModulo !== 'todos') {
-      resultado = resultado.filter(
-        (r) => r.modulo?.toLowerCase() === filtroModulo.toLowerCase()
-      )
-    }
-
     return [...resultado].sort((a, b) => {
       const fechaA = new Date(a.fecha).getTime()
       const fechaB = new Date(b.fecha).getTime()
       return ordenAscendente ? fechaA - fechaB : fechaB - fechaA
     })
-  }, [bitacora, busqueda, filtroModulo, ordenAscendente])
+  }, [bitacora, busqueda, ordenAscendente])
 
-  // Métricas
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE))
+
+  // Métricas. Las dos de abajo solo pueden calcularse sobre lo que está
+  // cargado, y sus etiquetas lo dicen. El conteo grande sale del `total` del
+  // servidor, que desde que el módulo se filtra allá es el total DEL CONJUNTO
+  // FILTRADO, no el del historial entero: por eso la etiqueta nombra el filtro
+  // activo en vez de decir "total" a secas.
   const metricas = useMemo(() => {
-    const totalEventos = bitacora.length
     const usuariosUnicos = new Set(bitacora.map((r) => r.usuarioNombre || r.idUsuario)).size
     const iniciosSesion = bitacora.filter(
       (r) => (r.accion || '').toUpperCase().includes('INICIO') || (r.accion || '').toUpperCase().includes('LOGIN')
     ).length
-    return { totalEventos, usuariosUnicos, iniciosSesion }
+    return { usuariosUnicos, iniciosSesion }
   }, [bitacora])
 
   const handleExportarCSV = () => {
@@ -212,7 +272,7 @@ export default function BitacoraPage() {
 
   return (
     <RutaProtegida moduloRequerido="Bitacora">
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen flex flex-col">
         <BarraNavegacionSuperior />
         
         <main className="container mx-auto px-4 py-6 md:py-8 flex-1 max-w-7xl">
@@ -247,30 +307,32 @@ export default function BitacoraPage() {
 
           {/* Tarjetas de Resumen */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+            <Card className="bg-card border-primary/20">
               <CardContent className="p-4 flex items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
                   <Activity className="h-6 w-6" />
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                    Total Registros Auditados
+                    {filtroModulo === 'todos'
+                      ? 'Total Registros Auditados'
+                      : `Registros Auditados · ${filtroModulo}`}
                   </p>
                   <p className="text-2xl font-bold text-primary">
-                    {metricas.totalEventos} Eventos
+                    {total} Eventos
                   </p>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+            <Card className="bg-card border-border/50">
               <CardContent className="p-4 flex items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-blue-500/15 text-blue-500 flex items-center justify-center shrink-0">
                   <Users className="h-6 w-6" />
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                    Usuarios Ejecutores
+                    Usuarios Ejecutores · Esta Página
                   </p>
                   <p className="text-2xl font-bold text-foreground">
                     {metricas.usuariosUnicos} Usuarios Activos
@@ -279,14 +341,14 @@ export default function BitacoraPage() {
               </CardContent>
             </Card>
 
-            <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+            <Card className="bg-card border-border/50">
               <CardContent className="p-4 flex items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
                   <ShieldAlert className="h-6 w-6" />
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                    Inicios de Sesión
+                    Inicios de Sesión · Esta Página
                   </p>
                   <p className="text-2xl font-bold text-foreground">
                     {metricas.iniciosSesion} Accesos
@@ -297,7 +359,7 @@ export default function BitacoraPage() {
           </div>
 
           {/* Filtros */}
-          <Card className="bg-card/80 backdrop-blur-sm border-border/50 mb-6">
+          <Card className="bg-card border-border/50 mb-6">
             <CardContent className="pt-4">
               <div className="flex flex-col sm:flex-row gap-4">
                 {/* Búsqueda */}
@@ -312,7 +374,17 @@ export default function BitacoraPage() {
                 </div>
 
                 {/* Filtro por módulo */}
-                <Select value={filtroModulo} onValueChange={setFiltroModulo}>
+                {/* El reinicio de página va en el mismo manejador que el
+                    filtro, no en un efecto aparte: así sale una sola petición.
+                    Sin él, aplicar un filtro estando en la página 5 deja
+                    pidiendo una página que el conjunto filtrado no tiene. */}
+                <Select
+                  value={filtroModulo}
+                  onValueChange={(valor) => {
+                    setFiltroModulo(valor)
+                    setPagina(1)
+                  }}
+                >
                   <SelectTrigger className="w-full sm:w-[220px] bg-muted/50 border-border/50 h-10">
                     <Filter className="h-4 w-4 mr-2" />
                     <SelectValue placeholder="Módulo" />
@@ -341,13 +413,17 @@ export default function BitacoraPage() {
           </Card>
 
           {/* Tabla de Bitácora */}
-          <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+          <Card className="bg-card border-border/50">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold text-muted-foreground">
-                Mostrando {registrosFiltrados.length} eventos de bitácora
+                Mostrando {registrosFiltrados.length} de {total} eventos de bitácora
+                {totalPaginas > 1 && ` · página ${pagina} de ${totalPaginas}`}
               </CardTitle>
               <CardDescription>
-                Registro de auditoría ordenado descendentemente por fecha (UTC-6).
+                Registro de auditoría ordenado descendentemente por fecha (UTC-6). El filtro por
+                módulo lo aplica el servidor sobre el histórico completo. La búsqueda, en cambio,
+                se resuelve en el navegador: alcanza los {bitacora.length} registros cargados, no
+                todo el histórico; use el paginador para recorrer el resto.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0 sm:p-6">
@@ -434,7 +510,7 @@ export default function BitacoraPage() {
                       </div>
                     ) : (
                       registrosFiltrados.map((registro) => (
-                        <div key={registro.id} className="p-4 rounded-xl border border-border/60 bg-card/60 space-y-3 shadow-sm">
+                        <div key={registro.id} className="p-4 rounded-xl border border-border/60 bg-card space-y-3 shadow-sm">
                           {/* Fila 1: Fecha completa */}
                           <div className="flex items-center justify-between">
                             <span className="font-mono text-[11px] font-semibold text-primary">
@@ -477,6 +553,36 @@ export default function BitacoraPage() {
                       ))
                     )}
                   </div>
+
+                  {total > LIMITE && (
+                    <div className="flex items-center justify-between px-4 pt-4 sm:px-0">
+                      <p className="text-xs text-muted-foreground">
+                        Página {pagina} de {totalPaginas} · {total} eventos
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                          disabled={pagina <= 1 || cargando}
+                          className="gap-1 cursor-pointer"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                          Anterior
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                          disabled={pagina >= totalPaginas || cargando}
+                          className="gap-1 cursor-pointer"
+                        >
+                          Siguiente
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>

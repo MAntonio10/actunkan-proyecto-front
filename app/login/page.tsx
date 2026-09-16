@@ -322,7 +322,7 @@ export default function AutenticacionPage() {
                   "radial-gradient(circle, color-mix(in oklch, var(--primary) 35%, transparent), transparent 70%)",
               }}
             />
-            <div className="relative rounded-2xl bg-card/90 px-5 py-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10 backdrop-blur">
+            <div className="relative rounded-2xl bg-card px-5 py-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10">
               <LogosInstitucionales tamano="lg" prioridad />
             </div>
           </div>
@@ -338,7 +338,7 @@ export default function AutenticacionPage() {
 
         {/* VISTA 1: FORMULARIO DE LOGIN */}
         {vista === "login" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+          <Card className="card-realzada acento-superior border-border/60 bg-card">
             <CardHeader className="text-center pb-2 pt-6">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <Shield className="h-5 w-5 text-primary" />
@@ -483,7 +483,7 @@ export default function AutenticacionPage() {
 
         {/* VISTA 2: SOLICITAR CÓDIGO DE RESTABLECIMIENTO */}
         {vista === "solicitar" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+          <Card className="card-realzada acento-superior border-border/60 bg-card">
             <CardHeader className="text-center pb-2 pt-6">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <KeyRound className="h-5 w-5 text-primary" />
@@ -555,7 +555,7 @@ export default function AutenticacionPage() {
 
         {/* VISTA 3: VALIDAR CÓDIGO Y RESTABLECER CONTRASEÑA */}
         {vista === "restablecer" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card/85 backdrop-blur-md">
+          <Card className="card-realzada acento-superior border-border/60 bg-card">
             <CardHeader className="text-center pb-2 pt-6">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <Lock className="h-5 w-5 text-primary" />

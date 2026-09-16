@@ -88,7 +88,7 @@ function ContenidoPagoExito() {
   // Estado: Cargando verificación inicial
   if (cargando) {
     return (
-      <Card className="w-full max-w-lg bg-card/90 backdrop-blur-md border-border/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+      <Card className="w-full max-w-lg bg-card border-border/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
         <CardContent className="p-8 flex flex-col items-center justify-center text-center space-y-4">
           <div className="relative">
             <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center ring-8 ring-primary/5">
@@ -111,7 +111,7 @@ function ContenidoPagoExito() {
   // Estado: Error de comunicación o parámetro ausente
   if (error && !resultado) {
     return (
-      <Card className="w-full max-w-lg bg-card/90 backdrop-blur-md border-destructive/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
+      <Card className="w-full max-w-lg bg-card border-destructive/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
         <CardHeader className="text-center pb-2 pt-6">
           <div className="h-16 w-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto mb-2 ring-8 ring-destructive/5">
             <XCircle className="h-9 w-9" />
@@ -154,7 +154,7 @@ function ContenidoPagoExito() {
   // Estado: Pago no confirmado (pagado: false)
   if (resultado && !resultado.pagado) {
     return (
-      <Card className="w-full max-w-lg bg-card/90 backdrop-blur-md border-amber-500/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
+      <Card className="w-full max-w-lg bg-card border-amber-500/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
         <CardHeader className="text-center pb-2 pt-6">
           <div className="h-16 w-16 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2 ring-8 ring-amber-500/5">
             <AlertTriangle className="h-9 w-9" />
@@ -225,7 +225,7 @@ function ContenidoPagoExito() {
       : null
 
   return (
-    <Card className="w-full max-w-lg bg-card/90 backdrop-blur-md border-emerald-500/40 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+    <Card className="w-full max-w-lg bg-card border-emerald-500/40 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
       {/* Barra de estado superior */}
       <div className="bg-emerald-600 text-white px-4 py-2 text-center text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-xs">
         <Sparkles className="h-3.5 w-3.5" />
@@ -291,7 +291,7 @@ function ContenidoPagoExito() {
               <Ticket className="h-4 w-4 text-primary" />
               Cantidad de Personas
             </span>
-            <Badge variant="outline" className="font-bold text-xs bg-background/80">
+            <Badge variant="outline" className="font-bold text-xs bg-background">
               {cantidadPax} {cantidadPax === 1 ? 'Persona' : 'Personas'}
             </Badge>
           </div>
@@ -336,7 +336,7 @@ function ContenidoPagoExito() {
 
 export default function PaginaPagoExito() {
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
       {/* Fondo ambiental sutil */}
       <div
         aria-hidden
@@ -364,7 +364,7 @@ export default function PaginaPagoExito() {
       <main className="w-full flex justify-center">
         <Suspense
           fallback={
-            <Card className="w-full max-w-lg bg-card/80 p-8 flex flex-col items-center justify-center gap-3">
+            <Card className="w-full max-w-lg bg-card p-8 flex flex-col items-center justify-center gap-3">
               <Spinner className="h-8 w-8 text-primary" />
               <p className="text-sm text-muted-foreground">Cargando pasarela...</p>
             </Card>

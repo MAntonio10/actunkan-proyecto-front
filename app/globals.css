@@ -4,25 +4,33 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ActunKan Ecological Park - Light Green & Brown Nature Theme */
+/*
+ * Las superficies del tema claro viven en el tono cafe de OKLCH (matiz 58-80),
+ * no en el verde-oliva: el fondo del sistema es un mapa en tierras claras y
+ * con superficies verdosas encima la pantalla se veia en dos temperaturas.
+ * La luminosidad se mantiene alta a proposito -- es un tema claro, el cafe
+ * esta en el matiz y el croma, nunca en oscurecer. El verde institucional
+ * sigue intacto en `--primary`, `--ring` y las graficas.
+ */
 :root {
-  --background: oklch(0.97 0.012 95);
-  --foreground: oklch(0.24 0.04 110);
-  --card: oklch(0.99 0.008 95);
-  --card-foreground: oklch(0.24 0.04 110);
-  --popover: oklch(0.99 0.008 95);
-  --popover-foreground: oklch(0.24 0.04 110);
+  --background: oklch(0.962 0.022 77);
+  --foreground: oklch(0.25 0.035 65);
+  --card: oklch(0.985 0.014 80);
+  --card-foreground: oklch(0.25 0.035 65);
+  --popover: oklch(0.985 0.014 80);
+  --popover-foreground: oklch(0.25 0.035 65);
   --primary: oklch(0.48 0.12 145);
-  --primary-foreground: oklch(0.98 0.008 95);
-  --secondary: oklch(0.92 0.025 85);
-  --secondary-foreground: oklch(0.30 0.05 110);
-  --muted: oklch(0.93 0.018 90);
-  --muted-foreground: oklch(0.46 0.04 105);
-  --accent: oklch(0.93 0.03 145);
-  --accent-foreground: oklch(0.35 0.11 145);
+  --primary-foreground: oklch(0.985 0.014 80);
+  --secondary: oklch(0.905 0.038 74);
+  --secondary-foreground: oklch(0.31 0.045 65);
+  --muted: oklch(0.922 0.030 76);
+  --muted-foreground: oklch(0.47 0.042 68);
+  --accent: oklch(0.90 0.048 70);
+  --accent-foreground: oklch(0.36 0.065 58);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.86 0.025 90);
-  --input: oklch(0.91 0.02 90);
+  --border: oklch(0.848 0.038 74);
+  --input: oklch(0.898 0.032 75);
   --ring: oklch(0.55 0.13 145);
   --chart-1: oklch(0.55 0.14 145);
   --chart-2: oklch(0.65 0.12 95);
@@ -30,13 +38,17 @@
   --chart-4: oklch(0.70 0.08 130);
   --chart-5: oklch(0.50 0.10 105);
   --radius: 0.625rem;
-  --sidebar: oklch(0.95 0.018 90);
-  --sidebar-foreground: oklch(0.24 0.04 110);
+  /* Cuanto color de fondo se interpone entre el dibujo del fondo y el
+     contenido. Es el unico numero a tocar para que el fondo se note mas o
+     menos en todo el sistema. */
+  --fondo-velo: 38%;
+  --sidebar: oklch(0.938 0.030 76);
+  --sidebar-foreground: oklch(0.25 0.035 65);
   --sidebar-primary: oklch(0.48 0.12 145);
-  --sidebar-primary-foreground: oklch(0.98 0.008 95);
-  --sidebar-accent: oklch(0.90 0.03 85);
-  --sidebar-accent-foreground: oklch(0.30 0.05 110);
-  --sidebar-border: oklch(0.86 0.025 90);
+  --sidebar-primary-foreground: oklch(0.985 0.014 80);
+  --sidebar-accent: oklch(0.885 0.045 72);
+  --sidebar-accent-foreground: oklch(0.31 0.045 65);
+  --sidebar-border: oklch(0.848 0.038 74);
   --sidebar-ring: oklch(0.55 0.13 145);
 }
 
@@ -73,6 +85,7 @@
   --sidebar-accent-foreground: oklch(0.92 0.005 155);
   --sidebar-border: oklch(0.28 0.03 155);
   --sidebar-ring: oklch(0.55 0.12 165);
+  --fondo-velo: 70%;
 }
 
 @theme inline {
@@ -120,11 +133,67 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply text-foreground;
     background-color: var(--background);
-    /* Capa 1: bruma verde arriba-izquierda. Capa 2: calidez café abajo-derecha.
-       Capa 3: patron de hojas SVG muy tenue para textura organica. */
+  }
+
+  /*
+   * Fondo institucional del sistema: el mapa topografico con la fauna del
+   * parque (`public/fondo-sistema-1920.webp`). Se pinta una sola vez aca y lo
+   * heredan todas las rutas; ninguna pagina debe volver a colocarlo.
+   *
+   * Va en un pseudo-elemento fijo y no como `background-attachment: fixed` del
+   * body porque Safari en iOS ignora ese valor -- ahi la imagen se reescala y
+   * salta con el scroll -- y porque un elemento fijo se compone una sola vez en
+   * lugar de repintarse en cada cuadro, que es lo que importa en la tablet de
+   * la taquilla.
+   *
+   * El z-index negativo lo deja debajo de todo el contenido. Es -30 y no -1 a
+   * proposito: varias pantallas (login, pago, `ruta_protegida`) tienen su
+   * propia capa decorativa en `-z-10`, y esas deben quedar ENCIMA del fondo.
+   *
+   * Para que se vea, ningun contenedor de pagina a pantalla completa puede
+   * llevar `bg-background`: ese color es opaco y lo taparia entero.
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    /*
+     * `100vw` y no `100%`: el ancho tiene que ser el mismo en todos los modulos.
+     * `100%` mide el area visible SIN la barra de desplazamiento, asi que al
+     * pasar de un modulo corto (sin barra) a uno largo (con barra) cambiaba unos
+     * 15 px, y como el dibujo se encaja con `cover`, ese cambio lo reencuadraba:
+     * el mapa saltaba en cada navegacion. `100vw` incluye la barra, exista o no,
+     * de modo que el encuadre queda quieto. Lo que sobra queda debajo de la
+     * barra y no se ve; al ser una capa fija tampoco genera desplazamiento
+     * horizontal.
+     *
+     * Se descarto `scrollbar-gutter: stable` en el `html`, que tambien lo
+     * arreglaba: `react-remove-scroll` (el que usan los dialogos de Radix)
+     * compensa la barra con un margen al bloquear el desplazamiento, y con el
+     * hueco ya reservado la compensacion se suma dos veces y el contenido se
+     * corre al abrir cualquier dialogo.
+     */
+    width: 100vw;
+    /* Alto fijo al viewport grande (el de la barra del navegador escondida) en
+       vez de `inset: 0`. En el celular la barra aparece y desaparece al
+       desplazar, y con `inset: 0` la capa se reajustaba en cada cambio: otra vez
+       `cover` reencuadrando, ahora durante el scroll. El valor bueno es `lvh` y
+       va aparte, en un `@supports`: repetir la propiedad no sirve de respaldo
+       porque el minificador se queda solo con la ultima y el navegador viejo se
+       quedaria con la capa en cero, es decir sin fondo. */
+    height: 100vh;
+    z-index: -30;
+    pointer-events: none;
+    /* Capa 1 y 2: la bruma verde arriba-izquierda y la calidez cafe
+       abajo-derecha, el tinte de marca que el sistema ya tenia. Capa 3: velo
+       del color de fondo que baja el contraste del dibujo para que no compita
+       con el texto (suba `--fondo-velo` si el fondo distrae, bajelo si se
+       pierde). Capa 4: la imagen. */
     background-image:
       radial-gradient(
         ellipse 70% 55% at 12% 0%,
@@ -136,10 +205,27 @@
         color-mix(in oklch, var(--accent) 16%, transparent) 0%,
         transparent 65%
       ),
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='none' stroke='%235a8557' stroke-opacity='0.07' stroke-width='1.2'><path d='M30 90 Q40 60 60 50 Q80 40 95 25'/><path d='M55 50 Q60 55 60 65'/><path d='M70 45 Q72 52 73 60'/><path d='M82 35 Q85 42 88 48'/><path d='M30 90 Q35 95 45 95'/></g></svg>");
-    background-attachment: fixed;
-    background-size: auto, auto, 220px 220px;
-    background-repeat: no-repeat, no-repeat, repeat;
+      linear-gradient(
+        180deg,
+        color-mix(in oklch, var(--background) var(--fondo-velo), transparent) 0%,
+        color-mix(in oklch, var(--background) var(--fondo-velo), transparent) 100%
+      ),
+      url("/fondo-sistema-1920.webp");
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: cover;
+  }
+
+  @supports (height: 100lvh) {
+    body::before {
+      height: 100lvh;
+    }
+  }
+
+  /* El dibujo es beige claro: sobre el tema oscuro se apaga hasta quedar solo
+     como textura, en vez de abrir un hueco blanco detras del contenido. */
+  .dark body::before {
+    opacity: 0.12;
   }
 }
 
@@ -211,6 +297,21 @@
     );
   }
 
+  /* Entrada de la respuesta de la IA: llega desenfocada y se va aclarando.
+     `both` conserva el primer fotograma durante el retraso, que es lo que
+     permite escalonar dos bloques sin que el segundo asome antes de empezar.
+     Termina en `filter: none` y no en `blur(0)`: un filtro aplicado, aunque
+     sea de cero, deja el elemento compuesto aparte para siempre. */
+  .aparicion-suave {
+    animation: aparicion-suave 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aparicion-suave {
+      animation: none;
+    }
+  }
+
   /* "Chip" de subtitulo */
   .chip-acento {
     display: inline-flex;
@@ -230,5 +331,18 @@
     color: var(--accent-foreground);
     background: color-mix(in oklch, var(--accent) 22%, transparent);
     border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  }
+}
+
+@keyframes aparicion-suave {
+  from {
+    opacity: 0;
+    filter: blur(14px);
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
   }
 }

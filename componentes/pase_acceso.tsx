@@ -37,7 +37,7 @@ export function PaseAcceso({ preview, ticketsEmitidos, fecha }: PaseAccesoProps)
   const tieneEmitidos = emitidos.length > 0
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50 overflow-hidden">
+    <Card className="bg-card border-border/50 overflow-hidden">
       <CardContent className="p-0">
         {/* Cabecera del pase */}
         <div className="flex flex-col items-center pt-5 pb-3 border-b border-dashed border-border/50 px-4">

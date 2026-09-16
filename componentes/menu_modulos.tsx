@@ -54,7 +54,7 @@ function ModuloCard({
           "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background",
           esActivo
             ? "border-primary bg-primary/10 text-primary shadow-sm shadow-primary/20"
-            : "border-border/50 bg-card/50 text-muted-foreground hover:text-foreground",
+            : "border-border/50 bg-card text-muted-foreground hover:text-foreground",
         )}
       >
         <div
@@ -157,7 +157,7 @@ export function MenuModulos() {
           <span className="sr-only">Modulos del sistema</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-4xl bg-background/95 backdrop-blur-md border-border">
+      <DialogContent className="max-w-4xl bg-background border-border">
         <DialogHeader>
           <DialogTitle className="text-sm uppercase tracking-wider text-muted-foreground">
             Modulos del Sistema

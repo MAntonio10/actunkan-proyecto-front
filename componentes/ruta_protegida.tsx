@@ -42,7 +42,7 @@ export function RutaProtegida({
 
   if (cargando) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="flex flex-col items-center gap-3 p-6">
           <Spinner className="h-8 w-8 text-primary" />
           <p className="text-sm font-medium text-muted-foreground">Verificando sesión y permisos...</p>
@@ -58,7 +58,7 @@ export function RutaProtegida({
   // 1. Si el usuario no tiene NINGÚN permiso asignado en todo el sistema
   if (!tieneAlgunPermiso()) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
+      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
         {/* Fondo decorativo */}
         <div
           aria-hidden
@@ -70,7 +70,7 @@ export function RutaProtegida({
             `,
           }}
         />
-        <div className="max-w-md w-full bg-card/90 backdrop-blur-md p-8 rounded-xl border border-destructive/30 shadow-xl text-center space-y-6">
+        <div className="max-w-md w-full bg-card p-8 rounded-xl border border-destructive/30 shadow-xl text-center space-y-6">
           <div className="h-16 w-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto ring-8 ring-destructive/5">
             <Lock className="h-8 w-8" />
           </div>
@@ -79,7 +79,7 @@ export function RutaProtegida({
             <p className="text-sm text-muted-foreground leading-relaxed">
               Estimado/a <span className="font-semibold text-foreground">{usuario?.nombre || 'usuario'}</span>, su cuenta se encuentra activa pero no tiene asignado ningún módulo ni permiso en el sistema.
             </p>
-            <div className="p-3 bg-muted/60 rounded-lg text-xs text-muted-foreground border border-border/50 mt-3 text-left">
+            <div className="p-3 bg-muted rounded-lg text-xs text-muted-foreground border border-border/50 mt-3 text-left">
               <span className="font-medium text-foreground">¿Qué debe hacer?</span>
               <br />
               Por favor contacte al administrador del parque para que le asigne los módulos y permisos requeridos para su puesto de trabajo.
@@ -113,7 +113,7 @@ export function RutaProtegida({
   if (moduloRequerido && accionRequerida) {
     if (!tienePermiso(moduloRequerido, accionRequerida)) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="min-h-screen flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-card p-8 rounded-xl border border-border/80 shadow-lg text-center space-y-4">
             <div className="h-12 w-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
               <ShieldAlert className="h-6 w-6" />
@@ -138,7 +138,7 @@ export function RutaProtegida({
   } else if (moduloRequerido) {
     if (!tieneAccesoModulo(moduloRequerido)) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="min-h-screen flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-card p-8 rounded-xl border border-border/80 shadow-lg text-center space-y-4">
             <div className="h-12 w-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
               <ShieldAlert className="h-6 w-6" />

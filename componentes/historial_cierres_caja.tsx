@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ClipboardCheck,
   Scale,
@@ -104,7 +104,14 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
   const [cierreAAnular, setCierreAAnular] = useState<CierreCajaHistorial | null>(null);
   const [anulandoId, setAnulandoId] = useState<number | null>(null);
 
+  // Las respuestas se descartan si ya salió otra petición después. Al cambiar un
+  // filtro estando en una página > 1 salen dos casi a la vez (la del filtro y la
+  // del regreso a la página 1), y sin este guardia la que llegue tarde -- que
+  // puede ser la vieja -- pinta datos que no corresponden al paginador.
+  const peticionVigente = useRef(0);
+
   const cargar = useCallback(async () => {
+    const idPeticion = ++peticionVigente.current;
     setCargando(true);
     try {
       const res = await api.cajas.getCierres({
@@ -117,19 +124,27 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
         pagina,
         limite: LIMITE,
       });
-      setCierres(Array.isArray(res.datos) ? res.datos : []);
-      setTotal(res.total || 0);
-      setMetricas(res.metricas || null);
+      if (idPeticion !== peticionVigente.current) return;
+      setCierres(Array.isArray(res?.datos) ? res.datos : []);
+      setTotal(res?.total || 0);
+      setMetricas(res?.metricas || null);
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigente.current) return;
       const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
       toast.error("Error al cargar cierres", { description: mensaje });
       setCierres([]);
       setTotal(0);
       setMetricas(null);
     } finally {
-      setCargando(false);
+      if (idPeticion === peticionVigente.current) setCargando(false);
     }
   }, [fechaInicio, fechaFin, soloAnulados, pagina]);
+
+  // Cambiar un filtro estando en la página 3 dejaba pidiendo la página 3 de un
+  // conjunto nuevo, que casi siempre viene vacía y se ve como "no hay nada".
+  useEffect(() => {
+    setPagina(1);
+  }, [fechaInicio, fechaFin, soloAnulados]);
 
   useEffect(() => {
     cargar();
@@ -162,7 +177,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+        <Card className="bg-card border-primary/20">
           <CardContent className="p-4 flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
               <ClipboardCheck className="h-5 w-5" />
@@ -176,7 +191,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-card border-border/50">
           <CardContent className="p-4">
             <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
               Total contado
@@ -187,7 +202,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-card border-border/50">
           <CardContent className="p-4">
             <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
               Total esperado
@@ -200,7 +215,6 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
 
         <Card
           className={cn(
-            "backdrop-blur-sm",
             diferenciaAcum === 0
               ? "bg-emerald-500/10 border-emerald-500/30"
               : diferenciaAcum > 0
@@ -233,7 +247,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
         </Card>
       </div>
 
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -398,7 +412,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                         "p-4 rounded-xl border space-y-3 shadow-sm",
                         c.anulado
                           ? "border-amber-500/40 bg-amber-500/[0.07] border-l-4 border-l-amber-500"
-                          : "border-border/60 bg-card/60",
+                          : "border-border/60 bg-card",
                       )}
                     >
                       <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-2">
@@ -472,7 +486,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                       variant="outline"
                       size="sm"
                       onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                      disabled={pagina <= 1}
+                      disabled={pagina <= 1 || cargando}
                       className="gap-1 cursor-pointer"
                     >
                       <ChevronLeft className="h-4 w-4" />
@@ -482,7 +496,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                       variant="outline"
                       size="sm"
                       onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                      disabled={pagina >= totalPaginas}
+                      disabled={pagina >= totalPaginas || cargando}
                       className="gap-1 cursor-pointer"
                     >
                       Siguiente

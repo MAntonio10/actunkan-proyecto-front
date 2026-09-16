@@ -207,7 +207,13 @@ export function ModuloActividades() {
     return () => clearTimeout(t);
   }, [busqueda]);
 
+  // Las respuestas se descartan si ya salió otra petición después. La búsqueda
+  // sale con retardo y una lenta puede llegar tarde: sin este guardia, escribir
+  // rápido deja en pantalla el resultado de un término anterior.
+  const peticionVigenteLista = useRef(0);
+
   const cargar = useCallback(async () => {
+    const idPeticion = ++peticionVigenteLista.current;
     setCargando(true);
     try {
       const res = await api.actividades.listar({
@@ -219,15 +225,17 @@ export function ModuloActividades() {
         pagina,
         limite: LIMITE,
       });
-      setActividades(Array.isArray(res.datos) ? res.datos : []);
-      setTotal(res.total || 0);
+      if (idPeticion !== peticionVigenteLista.current) return;
+      setActividades(Array.isArray(res?.datos) ? res.datos : []);
+      setTotal(res?.total || 0);
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigenteLista.current) return;
       const mensaje = err instanceof Error ? err.message : "No se pudieron cargar las actividades";
       toast.error("Error al cargar", { description: mensaje });
       setActividades([]);
       setTotal(0);
     } finally {
-      setCargando(false);
+      if (idPeticion === peticionVigenteLista.current) setCargando(false);
     }
   }, [busquedaAplicada, soloMias, incluirExpiradas, soloAnuladas, pagina]);
 
@@ -249,8 +257,10 @@ export function ModuloActividades() {
 
   useEffect(() => {
     api.usuarios
-      .getUsuarios(false)
-      .then((res) => setUsuarios(Array.isArray(res) ? res : []))
+      // Alimenta un combo: el tope del backend de una vez, no la primera
+      // página de 50.
+      .getUsuarios(false, { limite: 200 })
+      .then((res) => setUsuarios(Array.isArray(res?.datos) ? res.datos : []))
       .catch(() => setUsuarios([]));
   }, []);
 
@@ -452,7 +462,7 @@ export function ModuloActividades() {
       {/* Los sectores no son un módulo aparte: se gobiernan con ActividadesParque */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <Tabs value={pestana} onValueChange={setPestana} className="w-full sm:w-auto">
-          <TabsList className="grid grid-cols-2 w-full sm:w-[360px] bg-muted/60 p-1 gap-1">
+          <TabsList className="grid grid-cols-2 w-full sm:w-[360px] bg-muted p-1 gap-1">
             <TabsTrigger value="publicaciones" className="gap-2 font-semibold cursor-pointer">
               <ClipboardList className="h-4 w-4 text-primary" />
               Publicaciones
@@ -484,7 +494,7 @@ export function ModuloActividades() {
       {pestana === "sectores" && <CatalogoSectores onCambio={cargarSectores} />}
 
       {pestana === "publicaciones" && (
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -600,7 +610,7 @@ export function ModuloActividades() {
                       ? "border-destructive/40 bg-destructive/[0.05] opacity-75"
                       : a.expirada
                         ? "border-amber-500/40 bg-amber-500/[0.05]"
-                        : "border-border/60 bg-card/60",
+                        : "border-border/60 bg-card",
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">

@@ -239,8 +239,11 @@ export default function ModuloUsuariosHubPage() {
         if (tab === 'usuarios' && puedeVerUsuarios) {
           promesas.push(
             api.usuarios
-              .getUsuarios(true)
-              .then((res) => setUsuarios(Array.isArray(res) ? res : []))
+              // `/usuarios` viene paginado (50 por omisión). Esta pantalla no
+              // tiene paginador y filtra en el cliente, así que pide el tope
+              // del backend; por encima de 200 usuarios habrá que paginarla.
+              .getUsuarios(true, { limite: 200 })
+              .then((res) => setUsuarios(Array.isArray(res?.datos) ? res.datos : []))
               .catch(() => {})
           )
           promesas.push(
@@ -295,8 +298,8 @@ export default function ModuloUsuariosHubPage() {
           if (puedeVerUsuarios) {
             promesas.push(
               api.usuarios
-                .getUsuarios(true)
-                .then((res) => setUsuarios(Array.isArray(res) ? res : []))
+                .getUsuarios(true, { limite: 200 })
+                .then((res) => setUsuarios(Array.isArray(res?.datos) ? res.datos : []))
                 .catch(() => {})
             )
           }
@@ -766,7 +769,7 @@ export default function ModuloUsuariosHubPage() {
 
   return (
     <RutaProtegida moduloRequerido="Usuarios">
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen flex flex-col">
         <BarraNavegacionSuperior />
 
         <main className="flex-1 container mx-auto px-4 py-6 md:py-8 space-y-6">
@@ -808,7 +811,7 @@ export default function ModuloUsuariosHubPage() {
             {/* TARJETAS ESTADÍSTICAS - Siempre arriba */}
             {pestanaActiva === 'usuarios' && puedeVerUsuarios && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Total Registrados</p>
@@ -820,7 +823,7 @@ export default function ModuloUsuariosHubPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Usuarios Activos</p>
@@ -832,7 +835,7 @@ export default function ModuloUsuariosHubPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Usuarios Anulados</p>
@@ -848,7 +851,7 @@ export default function ModuloUsuariosHubPage() {
 
             {pestanaActiva === 'puestos' && puedeVerPuestos && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Total Puestos</p>
@@ -860,7 +863,7 @@ export default function ModuloUsuariosHubPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Puestos Activos</p>
@@ -872,7 +875,7 @@ export default function ModuloUsuariosHubPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-border/60 bg-card/60">
+                <Card className="border-border/60 bg-card">
                   <CardContent className="pt-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs text-muted-foreground uppercase font-semibold">Puestos Anulados</p>
@@ -886,7 +889,7 @@ export default function ModuloUsuariosHubPage() {
               </div>
             )}
 
-            <TabsList className="inline-flex flex-wrap sm:flex-nowrap h-auto bg-muted/60 p-1.5 gap-2 rounded-xl border border-border/40 w-full sm:w-auto">
+            <TabsList className="inline-flex flex-wrap sm:flex-nowrap h-auto bg-muted p-1.5 gap-2 rounded-xl border border-border/40 w-full sm:w-auto">
               {puedeVerUsuarios && (
                 <TabsTrigger
                   value="usuarios"
@@ -959,7 +962,7 @@ export default function ModuloUsuariosHubPage() {
                     </div>
 
                     {/* FILTRO ESTADO (ACTIVOS / ANULADOS / TODOS) */}
-                    <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg">
+                    <div className="flex items-center gap-1 bg-muted p-1 rounded-lg">
                       <Button
                         type="button"
                         variant={filtroEstadoUsuario === 'activos' ? 'default' : 'ghost'}
@@ -1046,7 +1049,7 @@ export default function ModuloUsuariosHubPage() {
                                   </h3>
                                   <Badge
                                     variant="outline"
-                                    className="mt-1 font-normal text-[11px] bg-muted/60"
+                                    className="mt-1 font-normal text-[11px] bg-muted"
                                   >
                                     {u.puesto?.nombre || 'Sin Puesto'}
                                   </Badge>
@@ -1182,7 +1185,7 @@ export default function ModuloUsuariosHubPage() {
                         className="pl-9 bg-muted/30"
                       />
                     </div>
-                    <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg w-full md:w-auto">
+                    <div className="flex items-center gap-1 bg-muted p-1 rounded-lg w-full md:w-auto">
                       <Button
                         type="button"
                         variant={filtroEstadoPuesto === 'activos' ? 'default' : 'ghost'}

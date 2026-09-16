@@ -13,10 +13,29 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Spinner } from '@/components/ui/spinner'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
+import { api } from '@/lib/api'
+
+/** Suficiente para atajar el dedazo; el servidor valida de verdad con `@IsEmail`. */
+const CORREO_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 interface PanelCheckoutTarjetaProps {
   checkoutUrl: string
+  /**
+   * Ticket al que pertenece el enlace. Hace falta para que el correo lo mande el
+   * servidor: el enlace sale del pago guardado, no de esta pantalla.
+   */
+  idTicket?: number
   numeroTicket?: string
   montoTotal?: string | number
   nombreVisitante?: string
@@ -26,6 +45,7 @@ interface PanelCheckoutTarjetaProps {
 
 export function PanelCheckoutTarjeta({
   checkoutUrl,
+  idTicket,
   numeroTicket,
   montoTotal,
   nombreVisitante,
@@ -33,6 +53,9 @@ export function PanelCheckoutTarjeta({
   className = '',
 }: PanelCheckoutTarjetaProps) {
   const [copiado, setCopiado] = useState(false)
+  const [modalCorreo, setModalCorreo] = useState(false)
+  const [correo, setCorreo] = useState('')
+  const [enviando, setEnviando] = useState(false)
 
   const montoStr = montoTotal
     ? `Q${parseFloat(String(montoTotal)).toFixed(2)}`
@@ -59,9 +82,35 @@ export function PanelCheckoutTarjeta({
     .join('\n')
 
   const urlWhatsapp = `https://wa.me/?text=${encodeURIComponent(mensajeCompartir)}`
-  const urlMailto = `mailto:?subject=${encodeURIComponent(
-    `Enlace de Pago - Entradas Parque Actún Kan ${numeroTicket ? `(${numeroTicket})` : ''}`
-  )}&body=${encodeURIComponent(mensajeCompartir)}`
+
+  const correoValido = CORREO_VALIDO.test(correo.trim())
+
+  /**
+   * Lo manda el servidor, no el cliente de correo del taquillero.
+   *
+   * Antes esto era un `mailto:`: abría Outlook con el texto puesto y el envío
+   * quedaba en manos de quien atiende, que muchas veces no tiene cuenta
+   * configurada en la máquina de taquilla. Ahora sale del parque, con su
+   * remitente, y queda constancia en bitácora de a qué dirección se envió.
+   */
+  const enviarCorreo = async () => {
+    if (!idTicket || !correoValido || enviando) return
+    setEnviando(true)
+    try {
+      await api.tickets.enviarEnlacePago(idTicket, correo.trim())
+      toast.success('Enlace de pago enviado', {
+        description: `Se envió a ${correo.trim()}.`,
+      })
+      setModalCorreo(false)
+      setCorreo('')
+    } catch (error: unknown) {
+      const mensaje =
+        error instanceof Error ? error.message : 'Intente de nuevo en un momento.'
+      toast.error('No se pudo enviar el correo', { description: mensaje })
+    } finally {
+      setEnviando(false)
+    }
+  }
 
   return (
     <Card className={`border-2 border-amber-500/50 bg-amber-500/[0.04] shadow-lg overflow-hidden ${className}`}>
@@ -107,7 +156,7 @@ export function PanelCheckoutTarjeta({
               readOnly
               value={checkoutUrl}
               onClick={(e) => (e.target as HTMLInputElement).select()}
-              className="font-mono text-xs h-9 bg-background/80 border-border/80 text-foreground selection:bg-primary/20"
+              className="font-mono text-xs h-9 bg-background border-border/80 text-foreground selection:bg-primary/20"
             />
             <Button
               type="button"
@@ -148,13 +197,17 @@ export function PanelCheckoutTarjeta({
             type="button"
             variant="outline"
             size="sm"
-            asChild
+            onClick={() => setModalCorreo(true)}
+            disabled={!idTicket}
+            title={
+              idTicket
+                ? 'Enviar el enlace de pago por correo'
+                : 'No se puede enviar: falta el ticket de referencia'
+            }
             className="h-9 text-xs font-semibold gap-1.5 border-border/80 hover:bg-muted/40 cursor-pointer"
           >
-            <a href={urlMailto} title="Enviar por Correo Electrónico">
-              <Mail className="h-3.5 w-3.5 text-primary" />
-              <span>Correo</span>
-            </a>
+            <Mail className="h-3.5 w-3.5 text-primary" />
+            <span>Correo</span>
           </Button>
 
           {/* Abrir en nueva pestaña */}
@@ -177,6 +230,94 @@ export function PanelCheckoutTarjeta({
           </Button>
         </div>
       </CardContent>
+
+      {/* Envío por correo */}
+      <Dialog
+        open={modalCorreo}
+        onOpenChange={(abierto) => {
+          if (!enviando) setModalCorreo(abierto)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Mail className="h-4 w-4 text-primary" />
+              Enviar enlace de pago por correo
+            </DialogTitle>
+            <DialogDescription>
+              El parque enviará el enlace desde su propio correo, con un saludo y el
+              detalle de la compra.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="correo-enlace-pago" className="text-xs">
+                Correo del cliente
+              </Label>
+              <Input
+                id="correo-enlace-pago"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                autoFocus
+                placeholder="cliente@correo.com"
+                value={correo}
+                onChange={(evento) => setCorreo(evento.target.value)}
+                onKeyDown={(evento) => {
+                  if (evento.key === 'Enter') {
+                    evento.preventDefault()
+                    void enviarCorreo()
+                  }
+                }}
+                disabled={enviando}
+              />
+              {correo.trim() !== '' && !correoValido && (
+                <p className="text-[11px] text-destructive">
+                  Revise la dirección: falta el @ o el dominio.
+                </p>
+              )}
+            </div>
+
+            {/* Qué va a recibir el cliente, para poder confirmarlo antes de enviar. */}
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs space-y-1">
+              <p className="font-medium text-foreground">Se enviará:</p>
+              <p className="text-muted-foreground">
+                Hola{nombreVisitante ? ` ${nombreVisitante}` : ''}, gracias por su visita.
+                Para completar la compra de sus entradas, realice el pago con tarjeta en el
+                enlace seguro.
+              </p>
+              <ul className="text-muted-foreground space-y-0.5 pt-1">
+                {numeroTicket && <li>· Folio: {numeroTicket}</li>}
+                {atraccion && <li>· Atracción: {atraccion}</li>}
+                {montoStr && <li>· Total a pagar: {montoStr}</li>}
+                <li>· El enlace de pago y el aviso de que el QR se activa al confirmarse</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setModalCorreo(false)}
+              disabled={enviando}
+              className="cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={enviarCorreo}
+              disabled={!correoValido || enviando}
+              className="gap-2 cursor-pointer"
+            >
+              {enviando ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              Enviar enlace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

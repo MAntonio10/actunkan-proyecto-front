@@ -80,8 +80,12 @@ export function SelectorGuia({ idSeleccionado, onSeleccionar }: Props) {
         const res = await api.guias.listar({
           buscar: busquedaAplicada || undefined,
           incluirAnulados: conAnulados || undefined,
+          // `/guias` viene paginado y por omisión trae 50. Un selector no se
+          // pagina: se pide el tope del backend de una vez, o el día que haya
+          // más de 50 guías el desplegable empezaría a esconderlas sin avisar.
+          limite: 200,
         });
-        const lista = Array.isArray(res) ? res : [];
+        const lista = Array.isArray(res?.datos) ? res.datos : [];
         setGuias(lista);
         setDesdeCache(false);
 

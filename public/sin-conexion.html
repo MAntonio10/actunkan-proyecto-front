@@ -26,6 +26,10 @@
           --suave: #a3b09c;
           --borde: #38402f;
         }
+        /* El dibujo es beige claro: sobre el tema oscuro solo abriria un hueco.
+           Se califica con `html` porque la regla de `body` viene despues y, a
+           igual especificidad, ganaria la ultima. */
+        html body { background-image: none; }
       }
       * { box-sizing: border-box; }
       body {
@@ -35,7 +39,17 @@
         align-items: center;
         justify-content: center;
         padding: 1.5rem;
-        background: var(--fondo);
+        /* Mismo fondo que el resto del sistema. La imagen la precachea el
+           Service Worker junto a esta pagina, asi que tambien se ve sin senal;
+           el color plano queda debajo por si no llego a guardarse. */
+        background-color: var(--fondo);
+        background-image:
+          linear-gradient(180deg, rgb(245 241 230 / 45%), rgb(245 241 230 / 45%)),
+          url("/fondo-sistema-1920.webp");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
         color: var(--texto);
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       }

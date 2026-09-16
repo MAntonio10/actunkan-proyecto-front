@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   History,
   Search,
@@ -311,7 +311,13 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
     return () => clearTimeout(t);
   }, [busqueda]);
 
+  // Las respuestas se descartan si ya salió otra petición después. La búsqueda
+  // sale con retardo y una lenta puede llegar tarde: sin este guardia, escribir
+  // rápido deja en pantalla el resultado de un término anterior.
+  const peticionVigente = useRef(0);
+
   const cargarTickets = useCallback(async () => {
+    const idPeticion = ++peticionVigente.current;
     setCargando(true);
     try {
       const res = await api.tickets.getTickets({
@@ -322,11 +328,13 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
         pagina,
         limite: LIMITE_POR_PAGINA,
       });
-      setTicketsServidor(Array.isArray(res.datos) ? res.datos : []);
-      setTotal(res.total || 0);
-      setMetricas(res.metricas || null);
+      if (idPeticion !== peticionVigente.current) return;
+      setTicketsServidor(Array.isArray(res?.datos) ? res.datos : []);
+      setTotal(res?.total || 0);
+      setMetricas(res?.metricas || null);
       setServidorInalcanzable(false);
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigente.current) return;
       // Sin red no es un error del historial: las ventas locales siguen ahí y
       // son justamente lo que el taquillero necesita consultar en ese momento.
       if (esErrorDeRed(err)) {
@@ -340,7 +348,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
       setTotal(0);
       setMetricas(null);
     } finally {
-      setCargando(false);
+      if (idPeticion === peticionVigente.current) setCargando(false);
     }
   }, [busquedaAplicada, filtroAtraccion, filtroPago, filtroEstado, pagina]);
 
@@ -582,7 +590,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
 
       {/* Métricas calculadas por el servidor sobre el filtro completo, no solo la página */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+        <Card className="bg-card border-primary/20">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
               <Ticket className="h-6 w-6" />
@@ -606,7 +614,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-card border-border/50">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-blue-500/15 text-blue-500 flex items-center justify-center shrink-0">
               <Users className="h-6 w-6" />
@@ -622,7 +630,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           </CardContent>
         </Card>
 
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-card border-border/50">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
               <Banknote className="h-6 w-6" />
@@ -639,7 +647,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
         </Card>
       </div>
 
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -960,7 +968,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                           esAnulado && "opacity-70 bg-destructive/[0.04] border-destructive/30",
                           esLocal(t) && !esAnulado && "border-sky-500/40 border-dashed bg-sky-500/[0.06] border-l-4 border-l-sky-500",
                           !esLocal(t) && t.tipoTicket === "GUIA" && !esAnulado && "border-amber-500/40 bg-amber-500/[0.07] border-l-4 border-l-amber-500",
-                          !esLocal(t) && !esAnulado && t.tipoTicket !== "GUIA" && "border-border/60 bg-card/60"
+                          !esLocal(t) && !esAnulado && t.tipoTicket !== "GUIA" && "border-border/60 bg-card"
                         )}
                       >
                         <div className="flex items-center justify-between border-b border-border/40 pb-2">
@@ -1357,7 +1365,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                             <Input
                               readOnly
                               value={urlCheckout}
-                              className="font-mono text-xs h-8 bg-background/80"
+                              className="font-mono text-xs h-8 bg-background"
                             />
                             <Button
                               type="button"

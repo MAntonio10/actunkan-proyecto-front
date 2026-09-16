@@ -103,7 +103,7 @@ export function FormularioRegistroVisitantes({ onRegistroExitoso }: FormularioRe
   }
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="bg-card border-border/50">
       <CardHeader className="pb-4">
         <CardTitle className="flex items-center gap-2 text-lg">
           <UserPlus className="h-5 w-5 text-primary" />

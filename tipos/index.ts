@@ -126,12 +126,27 @@ export interface BitacoraBackend {
   }
 }
 
+// Los cinco listados de abajo devuelven el sobre `{ datos, total, pagina,
+// limite }`, igual que `RespuestaHistorialCierres` y compañía. `total` es el
+// conjunto filtrado completo, no el tamaño de la página. Los catálogos
+// (`/puestos`, `/acciones`, `/modulos`, `/modulos/mis-modulos`, `/sectores`,
+// `/tarifas` vigentes, `/tickets/catalogos`, `/auth/sesiones`) siguen siendo
+// arreglo plano: no los envuelva.
+export interface RespuestaBitacora {
+  datos: BitacoraBackend[]
+  total: number
+  pagina: number
+  limite: number
+}
+
 export interface FiltrosBitacora {
   idUsuario?: number
   modulo?: string
   accion?: string
   fechaInicio?: string
   fechaFin?: string
+  pagina?: number
+  /** Tope del backend: 200. Un 0 o algo mayor responde 400. */
   limite?: number
 }
 
@@ -834,16 +849,6 @@ export const AUDITORIA_DEMO: RegistroAuditoria[] = [
   },
 ]
 
-export const ESTADISTICAS_SEMANA: EstadisticasDiarias[] = [
-  { fecha: new Date('2026-03-01'), visitantes: 145, ingresos: 2175, tickets_emitidos: 52 },
-  { fecha: new Date('2026-03-02'), visitantes: 189, ingresos: 2835, tickets_emitidos: 68 },
-  { fecha: new Date('2026-03-03'), visitantes: 234, ingresos: 3510, tickets_emitidos: 84 },
-  { fecha: new Date('2026-03-04'), visitantes: 167, ingresos: 2505, tickets_emitidos: 60 },
-  { fecha: new Date('2026-03-05'), visitantes: 298, ingresos: 4470, tickets_emitidos: 107 },
-  { fecha: new Date('2026-03-06'), visitantes: 356, ingresos: 5340, tickets_emitidos: 128 },
-  { fecha: new Date('2026-03-07'), visitantes: 312, ingresos: 4680, tickets_emitidos: 112 },
-]
-
 // ==========================================
 // Interfaces Backend para API REST Aktun Kan
 // ==========================================
@@ -919,6 +924,13 @@ export interface UsuarioBackend {
   permiso?: PermisoBackend[]
 }
 
+export interface RespuestaUsuarios {
+  datos: UsuarioBackend[]
+  total: number
+  pagina: number
+  limite: number
+}
+
 export interface RespuestaTokens {
   access_token: string
   refresh_token: string
@@ -986,11 +998,27 @@ export interface GuiaBackend extends GuiaCatalogo {
   _count?: { tickets: number }
 }
 
+export interface RespuestaGuias {
+  datos: GuiaBackend[]
+  total: number
+  pagina: number
+  limite: number
+}
+
 export interface TarifaBackend {
   idAtraccion: number
   idOrigen: number
   idTipoVisitante: number
   precio: string
+}
+
+/** Solo el histórico (`/tarifas/historico`) viene paginado; `/tarifas`, que
+ *  devuelve las vigentes, sigue siendo un arreglo plano. */
+export interface RespuestaHistorialTarifas {
+  datos: TarifaBackend[]
+  total: number
+  pagina: number
+  limite: number
 }
 
 export interface CatalogosTickets {
@@ -1277,11 +1305,21 @@ export interface RespuestaCierreCaja {
   cierre: CierreCajaBackend
 }
 
+export interface RespuestaAperturasCajas {
+  datos: AperturaCajaBackend[]
+  total: number
+  pagina: number
+  limite: number
+}
+
 export interface FiltrosCajas {
   estado?: string
   fechaInicio?: string
   fechaFin?: string
   incluirAnulados?: boolean
+  pagina?: number
+  /** Tope del backend: 200. Un 0 o algo mayor responde 400. */
+  limite?: number
 }
 
 // Historial de cierres: vista de supervisión (Cajas/Editar). Incluye los
@@ -1398,6 +1436,11 @@ export interface FiltrosActividades {
   /** Papelera: solo las anuladas. Tiene prioridad sobre incluirAnuladas. */
   soloAnuladas?: boolean
   pagina?: number
+  /**
+   * OJO: `/actividades` NO usa el tope general de 200. Va con su propio preset
+   * (`PAGINACION_ACTIVIDADES`): por omisión 20 y **máximo 100**. Pedirle 200,
+   * como hacen los combos de los otros listados, responde 400.
+   */
   limite?: number
 }
 
@@ -1609,4 +1652,240 @@ export interface SecretoCifrado {
   clave: string
   iv: string
   datos: string
+}
+
+// ===========================================================================
+// Reportes (módulo Reportes)
+//
+// Espejo de `src/reportes/contratos.ts` del backend y del catálogo que arma
+// `ReportesService.listarCatalogo`. Ver `REPORTES_FRONTEND.md`.
+//
+// La estructura es deliberadamente genérica: un solo componente de tabla sirve
+// para los 18 reportes porque `columnas` dice cómo pintar cada celda. Por eso
+// aquí no hay ni un tipo por reporte ni ninguna clave de columna escrita a
+// mano — las del reporte de permisos se generan de la base (`modulo_3`,
+// `modulo_7`…) y las del arqueo desaparecen para quien no supervisa.
+// ===========================================================================
+
+export type FormatoColumnaReporte =
+  | 'texto'
+  | 'entero'
+  | 'decimal'
+  | 'moneda'
+  | 'porcentaje'
+  | 'fecha'
+  | 'fechaHora'
+
+export type AlineacionColumnaReporte = 'izquierda' | 'centro' | 'derecha'
+
+export interface ColumnaReporte {
+  clave: string
+  titulo: string
+  formato: FormatoColumnaReporte
+  /** Sin valor: derecha para los formatos numéricos, izquierda para el resto. */
+  alineacion?: AlineacionColumnaReporte
+  /** Fracción del ancho útil (0-1). */
+  ancho?: number
+  /** En puntos de PDF. En web es solo una pista relativa. */
+  anchoMinimo?: number
+  decimales?: number
+  /** Ausente = la columna no lleva total. */
+  total?: 'suma' | 'promedio' | 'conteo'
+  soloSupervisor?: boolean
+}
+
+/** El dinero viaja como cadena decimal (`"215.0000"`), nunca como número. */
+export type ValorCeldaReporte = string | number | boolean | null
+export type FilaReporte = Record<string, ValorCeldaReporte>
+
+export interface SeccionReporte {
+  titulo?: string
+  descripcion?: string
+  columnas: ColumnaReporte[]
+  filas: FilaReporte[]
+  /** Solo trae las claves de las columnas que declaran `total`. Puede faltar. */
+  totales?: FilaReporte | null
+  saltoDePaginaAntes?: boolean
+  filasDisponibles?: number
+}
+
+export interface KpiReporte {
+  etiqueta: string
+  /** Ya viene formateado desde el backend: se pinta tal cual. */
+  valor: string
+  detalle?: string
+  soloSupervisor?: boolean
+}
+
+export interface ResultadoReporte {
+  clave: string
+  titulo: string
+  subtitulo?: string
+  periodo?: { desde: string; hasta: string; etiqueta: string }
+  /** Constancia de con qué se generó; se imprime aunque venga vacío. */
+  filtrosAplicados: Array<{ etiqueta: string; valor: string }>
+  kpis: KpiReporte[]
+  secciones: SeccionReporte[]
+  orientacion: 'vertical' | 'horizontal'
+  notas?: string[]
+  generadoEn: string
+  generadoPor: string
+  /** Se alcanzó el tope de filas; el motivo viene como primera nota. */
+  truncado: boolean
+}
+
+export type TipoFiltroReporte =
+  | 'rangoFechas'
+  | 'usuario'
+  | 'atraccion'
+  | 'origen'
+  | 'pais'
+  | 'guia'
+  | 'tipoVisitante'
+  | 'tipoRecorrido'
+  | 'opcionPago'
+  | 'aperturaCaja'
+  | 'sector'
+  | 'modulo'
+  | 'accion'
+  | 'booleano'
+  /** Lista cerrada; los valores admitidos vienen en `opciones`. */
+  | 'opciones'
+  | 'numero'
+
+export interface EsquemaFiltroReporte {
+  /** Identifica el control en el formulario. */
+  clave: string
+  etiqueta: string
+  tipo: TipoFiltroReporte
+  descripcion: string
+  requerido?: boolean
+  /**
+   * Valores admitidos cuando el filtro es una lista cerrada.
+   *
+   * Vienen del catálogo, no escritos acá: así una dimensión nueva del reporte a
+   * medida aparece en el formulario sin tocar esta pantalla, igual que un
+   * reporte nuevo aparece en el menú.
+   */
+  opciones?: Array<{ valor: string; etiqueta: string }>
+  /**
+   * Nombres reales de la query string. **Es lo que hay que usar para armar la
+   * URL**, no `clave`: el rango de fechas es un control y dos parámetros
+   * (`periodo` → `desde`, `hasta`), y mandar `periodo=` devuelve 400.
+   */
+  parametros: string[]
+}
+
+export type CategoriaReporte =
+  | 'Tickets'
+  | 'Cajas'
+  | 'Donaciones'
+  | 'Bitácora'
+  | 'Usuarios'
+  | 'Actividades'
+
+export interface DefinicionReporte {
+  clave: string
+  titulo: string
+  descripcion: string
+  categoria: CategoriaReporte
+  moduloOrigen: string
+  soloSupervisor: boolean
+  orientacion: 'vertical' | 'horizontal'
+  filtros: EsquemaFiltroReporte[]
+  formatos: Array<'json' | 'pdf' | 'excel'>
+}
+
+export interface RespuestaCatalogoReportes {
+  /** Ya viene filtrado por los permisos del usuario: no hay que gatearlo otra vez. */
+  datos: DefinicionReporte[]
+  total: number
+  /** `false` = no hay clave de IA configurada; la vía a medida daría 503 siempre. */
+  interpretacionDisponible: boolean
+}
+
+export interface RespuestaInterpretacionReporte {
+  instruccion: string
+  /** Frase en español lista para pintar: qué entendió el servidor. */
+  interpretacion: string
+  especificacion: { clave: string; filtros: Record<string, string> }
+  formato: 'pdf' | 'excel'
+  /** Ya es una URL de la vía predeterminada: descargarla no vuelve a gastar IA. */
+  urlDescarga: string
+  resultado: ResultadoReporte
+}
+
+/** Valores del formulario de filtros, indexados por nombre de parámetro. */
+export type ValoresFiltrosReporte = Record<string, string>
+
+// ===========================================================================
+// Panel de gráficas (GET /reportes/dashboard)
+//
+// Espejo de `src/reportes/dashboard/dashboard.contratos.ts`. Es otra forma de
+// datos, no un reporte: series listas para dibujar en vez de tablas con
+// columnas. Los puntos traen `valor` numérico porque una gráfica convierte a
+// píxeles; el total exacto viene aparte y ya formateado, para que nadie lo
+// obtenga sumando puntos.
+// ===========================================================================
+
+export type TipoGraficaSugerido = 'linea' | 'barra' | 'dona' | 'embudo'
+
+/**
+ * Cada cuánto se agrupan las series temporales del panel. Un año por días son
+ * 365 puntos: ilegible y pesado para nada.
+ */
+export type GranoTemporal = 'dia' | 'semana' | 'mes'
+export type FormatoValorDashboard = 'moneda' | 'entero' | 'decimal' | 'porcentaje'
+
+export interface PuntoSerie {
+  etiqueta: string
+  valor: number
+  /** Clave cruda (fecha ISO, id): sirve para ordenar sin releer la etiqueta. */
+  clave?: string
+}
+
+export interface SerieDashboard {
+  clave: string
+  titulo: string
+  descripcion?: string
+  tipoSugerido: TipoGraficaSugerido
+  formato: FormatoValorDashboard
+  /** Qué se mide, para la leyenda del tooltip. */
+  unidad: string
+  puntos: PuntoSerie[]
+  /** Suma exacta, ya formateada. */
+  total: string
+  /** Reporte del catálogo que muestra lo mismo en tabla. */
+  urlDetalle?: string
+}
+
+export interface VariacionKpi {
+  /** Fracción: 0.18 es 18 %. */
+  porcentaje: number
+  direccion: 'sube' | 'baja' | 'igual'
+  etiqueta: string
+}
+
+export interface KpiDashboard {
+  clave: string
+  etiqueta: string
+  valor: string
+  formato: FormatoValorDashboard
+  /** Falta cuando el período anterior estuvo en cero: no hay porcentaje posible. */
+  variacion?: VariacionKpi
+}
+
+export interface Dashboard {
+  periodo: { desde: string; hasta: string; etiqueta: string }
+  /** Grano de las series temporales: cambia lo que significa un punto. */
+  grano: GranoTemporal
+  /** `true` si lo eligió el servidor por la duración del período. */
+  granoAutomatico: boolean
+  comparadoCon: { desde: string; hasta: string; etiqueta: string }
+  kpis: KpiDashboard[]
+  series: SerieDashboard[]
+  /** Paneles no armados por falta de permiso, con su motivo. */
+  omitidos: Array<{ panel: string; motivo: string }>
+  generadoEn: string
+  generadoPor: string
 }

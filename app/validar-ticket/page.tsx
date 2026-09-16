@@ -193,7 +193,7 @@ export default function ValidarTicketPage() {
 
           <div className="space-y-4">
             {/* Escáner */}
-            <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+            <Card className="bg-card border-border/50">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <QrCode className="h-5 w-5 text-primary" />
@@ -231,7 +231,7 @@ export default function ValidarTicketPage() {
             </Card>
 
             {/* Entrada manual: respaldo cuando el QR está dañado o no hay cámara */}
-            <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+            <Card className="bg-card border-border/50">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Keyboard className="h-4 w-4 text-primary" />
@@ -293,7 +293,7 @@ export default function ValidarTicketPage() {
                   </div>
 
                   {resultado.ticket && (
-                    <div className="rounded-lg bg-background/60 border border-border/50 p-3 space-y-2 text-sm">
+                    <div className="rounded-lg bg-background border border-border/50 p-3 space-y-2 text-sm">
                       <div className="flex justify-between gap-3">
                         <span className="text-muted-foreground">No. Ticket</span>
                         <span className="font-mono font-semibold text-primary">

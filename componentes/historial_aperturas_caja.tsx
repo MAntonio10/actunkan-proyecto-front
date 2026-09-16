@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   LockOpen,
   Lock,
@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   DollarSign,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -50,6 +52,10 @@ import { type AperturaCajaBackend } from "@/tipos";
 
 const TODOS = "todos";
 
+/** Tamaño de página. El backend acepta hasta 200; 50 es su valor por omisión y
+ *  el mismo que usa el historial de cierres, la pantalla hermana. */
+const LIMITE = 50;
+
 interface Props {
   /** Cambia al abrir, cerrar o reabrir una caja, para recargar. */
   refrescarToken?: number;
@@ -81,6 +87,8 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
   const puedeAnular = puedeAccion("Cajas", "Anular");
 
   const [aperturas, setAperturas] = useState<AperturaCajaBackend[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
   const [cargando, setCargando] = useState(true);
 
   const [estado, setEstado] = useState<string>(TODOS);
@@ -91,7 +99,14 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
   const [aAnular, setAAnular] = useState<AperturaCajaBackend | null>(null);
   const [anulandoId, setAnulandoId] = useState<number | null>(null);
 
+  // Las respuestas se descartan si ya salió otra petición después. Al cambiar un
+  // filtro estando en una página > 1 salen dos casi a la vez (la del filtro y la
+  // del regreso a la página 1), y sin este guardia la que llegue tarde -- que
+  // puede ser la vieja -- pinta datos que no corresponden al paginador.
+  const peticionVigente = useRef(0);
+
   const cargar = useCallback(async () => {
+    const idPeticion = ++peticionVigente.current;
     setCargando(true);
     try {
       const res = await api.cajas.listar({
@@ -99,20 +114,34 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
         fechaInicio: fechaInicio || undefined,
         fechaFin: fechaFin || undefined,
         incluirAnulados: incluirAnulados || undefined,
+        pagina,
+        limite: LIMITE,
       });
-      setAperturas(Array.isArray(res) ? res : []);
+      if (idPeticion !== peticionVigente.current) return;
+      setAperturas(Array.isArray(res?.datos) ? res.datos : []);
+      setTotal(res?.total || 0);
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigente.current) return;
       const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
       toast.error("Error al cargar aperturas", { description: mensaje });
       setAperturas([]);
+      setTotal(0);
     } finally {
-      setCargando(false);
+      if (idPeticion === peticionVigente.current) setCargando(false);
     }
+  }, [estado, fechaInicio, fechaFin, incluirAnulados, pagina]);
+
+  // Cambiar un filtro estando en la página 3 dejaba pidiendo la página 3 de un
+  // conjunto nuevo, que casi siempre viene vacía y se ve como "no hay nada".
+  useEffect(() => {
+    setPagina(1);
   }, [estado, fechaInicio, fechaFin, incluirAnulados]);
 
   useEffect(() => {
     cargar();
   }, [cargar, refrescarToken]);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE));
 
   const anular = useCallback(async () => {
     if (!aAnular || anulandoId !== null) return;
@@ -136,7 +165,7 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
 
   return (
     <div className="space-y-6">
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardHeader className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -337,7 +366,7 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
                             ? "border-destructive/40 bg-destructive/[0.06] border-l-4 border-l-destructive"
                             : abierta
                               ? "border-emerald-500/40 bg-emerald-500/[0.07] border-l-4 border-l-emerald-500"
-                              : "border-border/60 bg-card/60",
+                              : "border-border/60 bg-card",
                         )}
                       >
                         <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-2">
@@ -404,6 +433,36 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
                   })
                 )}
               </div>
+
+              {total > LIMITE && (
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Página {pagina} de {totalPaginas} · {total} aperturas
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                      disabled={pagina <= 1 || cargando}
+                      className="gap-1 cursor-pointer"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                      disabled={pagina >= totalPaginas || cargando}
+                      className="gap-1 cursor-pointer"
+                    >
+                      Siguiente
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </CardContent>

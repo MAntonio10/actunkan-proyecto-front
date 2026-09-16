@@ -367,7 +367,11 @@ export async function aplicarSeleccionDeSubida(idsASubir: Set<string>): Promise<
  */
 export async function precargarGuias(): Promise<void> {
   try {
-    const lista = await api.guias.listar()
+    // Igual que el selector: el tope de una sola vez, no la primera página.
+    // Acá además el error no se vería hasta que se caiga la red, que es cuando
+    // el catálogo guardado es lo único que hay.
+    const res = await api.guias.listar({ limite: 200 })
+    const lista = res?.datos
     if (!Array.isArray(lista)) return
     await db.transaction('rw', db.guias, async () => {
       await db.guias.clear()

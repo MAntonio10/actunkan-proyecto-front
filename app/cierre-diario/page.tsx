@@ -222,7 +222,7 @@ export default function CierreDiarioPage() {
 
   return (
     <RutaProtegida moduloRequerido="Cajas">
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen">
         <BarraNavegacionSuperior />
 
         <main className="container mx-auto px-4 py-6">
@@ -284,7 +284,7 @@ export default function CierreDiarioPage() {
                 <Tabs value={pestana} onValueChange={setPestana}>
                   <TabsList
                     className={cn(
-                      'grid w-full bg-muted/60 p-1 gap-1',
+                      'grid w-full bg-muted p-1 gap-1',
                       puedeSupervisar ? 'grid-cols-3 sm:w-[460px]' : 'grid-cols-2 sm:w-[320px]',
                     )}
                   >
@@ -307,7 +307,7 @@ export default function CierreDiarioPage() {
               </div>
 
               {pestana === 'caja' && !cajaActual && (
-                <Card className="bg-card/80 backdrop-blur-sm border-amber-500/40">
+                <Card className="bg-card border-amber-500/40">
                   <CardContent className="flex flex-col items-center justify-center py-16 gap-4 text-center">
                     <div className="h-16 w-16 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center">
                       <AlertCircle className="h-8 w-8" />
@@ -363,7 +363,7 @@ export default function CierreDiarioPage() {
                   {/* El arqueo previo es supervisión: quien cuenta el efectivo
                       no debe ver el monto esperado antes de contarlo. */}
                   {!puedeSupervisar && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+                    <Card className="bg-card border-border/50">
                       <CardContent className="p-4 flex items-start gap-3">
                         <EyeOff className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
                         <div className="text-sm">
@@ -385,7 +385,7 @@ export default function CierreDiarioPage() {
                       puedeSupervisar ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1',
                     )}
                   >
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+                    <Card className="bg-card border-border/50">
                       <CardContent className="pt-6">
                         <div className="flex items-start justify-between">
                           <div>
@@ -467,7 +467,7 @@ export default function CierreDiarioPage() {
                   </div>
 
                   {puedeSupervisar && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+                    <Card className="bg-card border-border/50">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-base">Cómo se calcula el arqueo</CardTitle>
                         <CardDescription>

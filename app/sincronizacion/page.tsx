@@ -689,7 +689,7 @@ export default function SincronizacionPage() {
                           ? 'border-destructive/40 bg-destructive/5'
                           : anulada
                             ? 'border-border/50 bg-muted/30 opacity-80'
-                            : 'border-border/60 bg-card/60',
+                            : 'border-border/60 bg-card',
                       )}
                     >
                       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -760,7 +760,7 @@ export default function SincronizacionPage() {
                       )}
 
                       {anulada && (
-                        <div className="rounded-lg bg-muted/60 border border-border/50 px-2.5 py-2 text-xs text-muted-foreground flex items-start gap-2">
+                        <div className="rounded-lg bg-muted border border-border/50 px-2.5 py-2 text-xs text-muted-foreground flex items-start gap-2">
                           <Ban className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                           <span>
                             Anulada en taquilla el {hora(v.fechaAnulacion)}

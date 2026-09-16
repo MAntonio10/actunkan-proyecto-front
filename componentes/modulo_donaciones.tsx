@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   HandHeart,
   Banknote,
@@ -130,7 +130,13 @@ export function ModuloDonaciones() {
     }
   }, []);
 
+  // Las respuestas se descartan si ya salió otra petición después. La búsqueda
+  // sale con retardo y una lenta puede llegar tarde: sin este guardia, escribir
+  // rápido deja en pantalla el resultado de un término anterior.
+  const peticionVigente = useRef(0);
+
   const cargarDonaciones = useCallback(async () => {
+    const idPeticion = ++peticionVigente.current;
     setCargandoLista(true);
     try {
       const res = await api.donaciones.listar({
@@ -139,17 +145,19 @@ export function ModuloDonaciones() {
         pagina,
         limite: LIMITE,
       });
-      setDonaciones(Array.isArray(res.datos) ? res.datos : []);
-      setTotal(res.total || 0);
-      setMetricas(res.metricas || null);
+      if (idPeticion !== peticionVigente.current) return;
+      setDonaciones(Array.isArray(res?.datos) ? res.datos : []);
+      setTotal(res?.total || 0);
+      setMetricas(res?.metricas || null);
     } catch (err: unknown) {
+      if (idPeticion !== peticionVigente.current) return;
       const mensaje = err instanceof Error ? err.message : "No se pudo cargar el historial";
       toast.error("Error al cargar donaciones", { description: mensaje });
       setDonaciones([]);
       setTotal(0);
       setMetricas(null);
     } finally {
-      setCargandoLista(false);
+      if (idPeticion === peticionVigente.current) setCargandoLista(false);
     }
   }, [busquedaAplicada, pagina]);
 
@@ -220,7 +228,7 @@ export function ModuloDonaciones() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+        <Card className="bg-card border-primary/20">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
               <Users className="h-6 w-6" />
@@ -252,7 +260,7 @@ export function ModuloDonaciones() {
       </div>
 
       <Tabs value={pestana} onValueChange={setPestana}>
-        <TabsList className="grid grid-cols-2 w-full sm:w-[340px] bg-muted/60 p-1 gap-1">
+        <TabsList className="grid grid-cols-2 w-full sm:w-[340px] bg-muted p-1 gap-1">
           {puedeCrear && (
             <TabsTrigger value="registro" className="gap-2 font-semibold cursor-pointer">
               <Plus className="h-4 w-4 text-primary" />
@@ -268,7 +276,7 @@ export function ModuloDonaciones() {
 
       {pestana === "registro" && puedeCrear && (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          <Card className="lg:col-span-3 bg-card/80 backdrop-blur-sm border-border/50">
+          <Card className="lg:col-span-3 bg-card border-border/50">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <HandHeart className="h-5 w-5 text-primary" />
@@ -349,7 +357,7 @@ export function ModuloDonaciones() {
 
           {/* Último recibo emitido */}
           <div className="lg:col-span-2">
-            <Card className="bg-card/80 backdrop-blur-sm border-border/50 lg:sticky lg:top-24">
+            <Card className="bg-card border-border/50 lg:sticky lg:top-24">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Último recibo</CardTitle>
                 <CardDescription>El PDF lo genera el servidor.</CardDescription>
@@ -412,7 +420,7 @@ export function ModuloDonaciones() {
       )}
 
       {(pestana === "historial" || !puedeCrear) && (
-        <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+        <Card className="bg-card border-border/50">
           <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
@@ -567,7 +575,7 @@ export function ModuloDonaciones() {
                           "p-4 rounded-xl border space-y-3 shadow-sm",
                           d.anulado
                             ? "border-destructive/40 bg-destructive/[0.06] border-l-4 border-l-destructive"
-                            : "border-border/60 bg-card/60",
+                            : "border-border/60 bg-card",
                         )}
                       >
                         <div className="flex items-center justify-between border-b border-border/40 pb-2">

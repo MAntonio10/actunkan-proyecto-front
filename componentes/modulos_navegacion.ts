@@ -87,6 +87,15 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     iconoDesktop: ClipboardList,
     ruta: '/actividades',
   },
+  Reportes: {
+    id: 'reportes',
+    nombre: 'Reportes',
+    nombreLargo: 'Reportes',
+    descripcion: 'Indicadores, tablas y gráficas',
+    icono: BarChart3,
+    iconoDesktop: BarChart3,
+    ruta: '/reportes',
+  },
   Bitacora: {
     id: 'bitacora',
     nombre: 'Bitácora',
@@ -99,20 +108,15 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
 }
 
 /**
- * Módulos aún sin implementar en el backend: nunca llegan en `mis-modulos`, así
- * que se muestran siempre para no desaparecer del menú. Al implementarse en el
- * backend deben moverse a MODULOS_BACKEND.
+ * Pantallas que no corresponden a un módulo del backend: nunca llegan en
+ * `mis-modulos`, así que se muestran siempre para no desaparecer del menú.
+ *
+ * Hoy solo queda Sincronización, y no es que le falte backend: es una pantalla
+ * del dispositivo —lee IndexedDB, no la API— y se gobierna con el permiso de
+ * EmisionTickets, que es quien vende sin conexión. Si en algún momento aparece
+ * aquí un módulo que el backend sí administra, muévalo a MODULOS_BACKEND.
  */
 export const MODULOS_SIN_BACKEND: ItemModulo[] = [
-  {
-    id: 'reportes',
-    nombre: 'Reportes',
-    nombreLargo: 'Reportes',
-    descripcion: 'Estadísticas y gráficos',
-    icono: BarChart3,
-    iconoDesktop: BarChart3,
-    ruta: '/reportes',
-  },
   {
     id: 'sincronizacion',
     nombre: 'Sync',

@@ -654,7 +654,7 @@ export function FormularioVisitanteCompleto({
 
   if (cargandoCatalogos) {
     return (
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardContent className="flex flex-col items-center justify-center py-16 gap-3">
           <Spinner className="h-8 w-8 text-primary" />
           <p className="text-sm text-muted-foreground">Cargando catálogos...</p>
@@ -665,7 +665,7 @@ export function FormularioVisitanteCompleto({
 
   if (!catalogos) {
     return (
-      <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <Card className="bg-card border-border/50">
         <CardContent className="flex flex-col items-center justify-center py-16 gap-3 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <p className="text-sm text-muted-foreground">
@@ -680,7 +680,7 @@ export function FormularioVisitanteCompleto({
   }
 
   return (
-    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+    <Card className="bg-card border-border/50">
       <CardHeader className="pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 space-y-0 border-b border-border/40 mb-4">
         <div className="flex items-center gap-2">
           <Ticket className="h-5 w-5 text-primary shrink-0" />
@@ -1230,7 +1230,7 @@ export function FormularioVisitanteCompleto({
                   />
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg bg-background/60 p-3 border border-border/40">
+                <div className="flex items-center justify-between rounded-lg bg-background p-3 border border-border/40">
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-1.5 font-medium text-sm">
                       <IdCard className="h-4 w-4 text-primary" />

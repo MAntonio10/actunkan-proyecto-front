@@ -7,6 +7,53 @@ Documento de referencia para la integración con la API REST del sistema **Aktun
 ## Novedades en Autenticación
 - **Restablecimiento de Contraseña con Código de 6 Dígitos:** Se agregaron los endpoints públicos `POST /auth/solicitar-codigo-restablecimiento`, `POST /auth/validar-codigo-restablecimiento` y `POST /auth/restablecer-contrasena` con envío de correos vía Nodemailer.
 - **Activación de Registros:** Endpoints explícitos `PATCH /:id/activar` para reactivar registros anulados en **Usuarios**, **Puestos** y **Módulos**.
+## Paginación de listados
+
+⚠️ **Cambio de contrato con el frontend (16-09-2026).** Cinco listados que antes
+devolvían un arreglo plano ahora devuelven un sobre:
+
+```json
+{ "datos": [ ... ], "total": 1627, "pagina": 1, "limite": 100 }
+```
+
+`total` es el conjunto **filtrado completo**, no el tamaño de la página. Todos
+aceptan además `pagina` (defecto `1`) y `limite`.
+
+| Endpoint | `limite` por defecto | Máximo |
+|---|---|---|
+| `GET /usuarios` | 50 | 200 |
+| `GET /bitacora` | 100 | 200 |
+| `GET /cajas` | 50 | 200 |
+| `GET /guias` | 50 | 200 |
+| `GET /tarifas/historico` | 50 | 200 |
+
+- `limite=0` o por encima del tope responde **400** con mensaje en español.
+- Una `pagina` más allá del final responde **200** con `datos: []` y el `total`
+  real. **No es un error**; no lo trate como fallo.
+- `/usuarios`, `/guias` y `/tarifas/historico` validan su query con un DTO
+  (`forbidNonWhitelisted`): un parámetro desconocido ya no se ignora, responde
+  **400**. Los válidos son exactamente `incluirAnulados` (usuarios, guías),
+  `buscar` (guías), `idAtraccion` e `idOrigen` (tarifas), más `pagina` y
+  `limite` en los tres.
+
+**Ya devolvían el sobre desde antes** (no cambiaron): `/tickets`, `/donaciones`,
+`/cajas/cierres`, `/actividades`.
+
+⚠️ **`/actividades` no usa el tope general.** Tiene su propio preset
+(`PAGINACION_ACTIVIDADES`): por omisión **20** y **máximo 100**. Pedirle
+`limite=200`, como hacen los combos de los demás listados, responde **400**.
+
+**Siguen siendo arreglo plano** — no los envuelva: `/puestos`, `/acciones`,
+`/modulos`, `/modulo-acciones`, `/modulos/mis-modulos`, `/sectores`, `/tarifas`
+(vigentes), `/tickets/catalogos`, `/auth/sesiones`.
+
+Del lado del frontend: un listado que alimenta un `<select>` o un caché offline
+pide `limite: 200` de una vez y lee `.datos` (no se pagina un desplegable, o
+esconde opciones sin avisar); los historiales con tabla sí usan `total` para
+pintar un paginador.
+
+---
+
 ## Seguridad y límites de peticiones
 
 **`JWT_SECRET` es obligatorio.** La aplicación **no arranca** si falta o tiene menos de 32 caracteres (`src/auth/auth.module.ts`). Antes existía un valor por defecto en el código, lo que permitía firmar tokens de cualquier usuario a quien tuviera acceso al repositorio; ese fallback se eliminó. Cambiar el secreto invalida todas las sesiones activas.
@@ -320,8 +367,8 @@ Registra un nuevo usuario en la base de datos bajo transacción atómica.
 
 ### 2.2 `GET /usuarios` (Listar Usuarios)
 * **Permiso requerido:** `Módulo: 'Usuarios'`, `Acción: 'Ver'`
-* **Query Params (Opcional):** `?incluirAnulados=true`
-* **Response (200 OK - JSON):**
+* **Query Params (Opcional):** `?incluirAnulados=true`, `?pagina=1`, `?limite=50` (máx. 200). Cualquier otro parámetro responde 400.
+* **Response (200 OK - JSON):** **paginado** — ver «Paginación de listados». El arreglo de abajo es el contenido de `datos`, dentro del sobre `{ datos, total, pagina, limite }`.
 ```json
 [
   {
@@ -985,13 +1032,15 @@ Obtiene los registros de auditoría ordenados descendentemente por fecha en huso
 * **Permiso requerido:** `Módulo: 'Bitacora'`, `Acción: 'Ver'`
 * **Query Params (Todos opcionales):**
   - `idUsuario` (número): Filtrar por ID de usuario ejecutor.
-  - `modulo` (texto): Filtrar por módulo (ej. `Auth`, `Usuarios`, `Puestos`, `Modulos`, `Acciones`).
-  - `accion` (texto): Filtrar por tipo de acción (ej. `INICIO_SESION`, `CREAR_USUARIO`, `EDITAR_PUESTO`, `ANULAR_MODULO`, `ASIGNAR_PERMISOS`).
+  - `modulo` (texto): Filtrar por módulo. **Coincide por `contains`, no por igualdad**: pedir `Tickets` devuelve también los de `EmisionTickets`.
+    El campo lo escribe cada service como texto libre, **no es una llave foránea a `Modulo`** y sus valores no coinciden con esa tabla. Los que existen hoy son: `ActividadesParque`, `Auth`, `Cajas`, `Donaciones`, `EmisionTickets`, `Gastos`, `Modulos`, `Reportes`, `Tarifas`, `Tickets`, `TiposGasto`, `Usuarios`. No pueble un desplegable desde `GET /modulos`: perdería `Tickets` y `Auth`, y ofrecería módulos sin ningún registro.
+  - `accion` (texto): Filtrar por tipo de acción. Hay 45 distintas; las de mayor volumen son `GENERAR_REPORTE`, `EXPORTAR_REPORTE`, `RESERVAR_FOLIOS_OFFLINE`, `ANULAR_TICKET` y `VALIDAR_TICKET`. Si algún día se expone este filtro en la interfaz, esos son los que valen la pena ofrecer; `CREAR_USUARIO` o `EDITAR_PUESTO` existen pero son marginales.
   - `fechaInicio` (ISO Date string): Filtrar desde fecha.
   - `fechaFin` (ISO Date string): Filtrar hasta fecha.
-  - `limite` (número, defecto `100`): Cantidad máxima de registros a retornar.
+  - `limite` (número, defecto `100`, máx. `200`): Tamaño de la página.
+  - `pagina` (número, defecto `1`).
 
-* **Response (200 OK - JSON):**
+* **Response (200 OK - JSON):** **paginado** — ver «Paginación de listados». El arreglo de abajo es el contenido de `datos`, dentro del sobre `{ datos, total, pagina, limite }`.
 ```json
 [
   {
@@ -1096,8 +1145,8 @@ Módulo de apertura y cierre de caja. Solo puede existir **una caja abierta a la
 
 ### 8.2 `GET /cajas` (Listar Aperturas)
 * **Permiso requerido:** `Módulo: 'Cajas'`, `Acción: 'Ver'`
-* **Query Params (Opcionales):** `?estado=Abierta`, `?fechaInicio=`, `?fechaFin=`, `?incluirAnulados=true`
-* **Response (200 OK - JSON):** Arreglo de objetos con la misma forma que 8.1.
+* **Query Params (Opcionales):** `?estado=Abierta`, `?fechaInicio=`, `?fechaFin=`, `?incluirAnulados=true`, `?pagina=1`, `?limite=50` (máx. 200)
+* **Response (200 OK - JSON):** **paginado** — sobre `{ datos, total, pagina, limite }` donde `datos` son objetos con la misma forma que 8.1. Ver «Paginación de listados».
 
 ---
 
@@ -1456,8 +1505,8 @@ Editar un precio **no sobrescribe** la fila: cierra la vigencia de la tarifa act
 
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
-| GET | `/tarifas` | `EmisionTickets` / `Ver` | Tarifas vigentes (atracción + origen + categoría) |
-| GET | `/tarifas/historico` | `EmisionTickets` / `Ver` | Historial completo. Filtros: `idAtraccion`, `idOrigen` |
+| GET | `/tarifas` | `EmisionTickets` / `Ver` | Tarifas vigentes (atracción + origen + categoría). Arreglo plano, **no** paginado |
+| GET | `/tarifas/historico` | `EmisionTickets` / `Ver` | Historial **paginado** (`{ datos, total, pagina, limite }`). Filtros: `idAtraccion`, `idOrigen`, `pagina`, `limite` (máx. 200) |
 | GET | `/tarifas/guia` | `EmisionTickets` / `Ver` | Tarifa vigente del ticket de guía sin carnet |
 | PATCH | `/tarifas` | `EmisionTickets` / `Editar` | `{ idAtraccion, idOrigen, idTipoVisitante, precio }` |
 | PATCH | `/tarifas/guia` | `EmisionTickets` / `Editar` | `{ precio }` |

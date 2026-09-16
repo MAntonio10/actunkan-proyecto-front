@@ -135,7 +135,7 @@ export default function RegistroVisitantesPage() {
                 onValueChange={cambiarPestana}
                 className="w-full sm:w-auto"
               >
-                <TabsList className="grid grid-cols-2 w-full sm:w-[300px] bg-muted/60 p-1 gap-1">
+                <TabsList className="grid grid-cols-2 w-full sm:w-[300px] bg-muted p-1 gap-1">
                   <TabsTrigger
                     value="emision"
                     className="text-xs sm:text-sm gap-2 font-semibold cursor-pointer"
@@ -199,6 +199,7 @@ export default function RegistroVisitantesPage() {
                     return (
                       <PanelCheckoutTarjeta
                         checkoutUrl={urlCheckout}
+                        idTicket={primerTicket?.id}
                         numeroTicket={primerTicket?.numeroTicket}
                         montoTotal={respuestaEmision?.montoTotalGeneral || primerTicket?.montoTotal}
                         nombreVisitante={primerTicket?.nombre || undefined}
@@ -279,6 +280,7 @@ export default function RegistroVisitantesPage() {
                     <div className="p-1 space-y-3">
                       <PanelCheckoutTarjeta
                         checkoutUrl={urlCheckout}
+                        idTicket={primerTicket?.id}
                         numeroTicket={primerTicket?.numeroTicket}
                         montoTotal={respuestaEmision?.montoTotalGeneral || primerTicket?.montoTotal}
                         nombreVisitante={primerTicket?.nombre || undefined}
