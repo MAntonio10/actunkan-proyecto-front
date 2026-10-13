@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   CheckCircle2,
@@ -19,21 +19,28 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { LogosInstitucionales } from '@/componentes/logos_institucionales'
 import { type RespuestaEstadoCheckout } from '@/tipos'
 
 /**
- * Cada cuánto se vuelve a consultar, y cuántas veces.
+ * Cada cuánto se vuelve a consultar.
  *
- * El cobro ya no lo confirma esta página: lo confirma el webhook que la pasarela le
- * manda al servidor, normalmente en segundos. Así que acá solo se sondea el estado
- * ya escrito hasta verlo cambiar. Dos minutos cubren de sobra una entrega normal; si
- * se agotan, lo probable es que el webhook no haya llegado, y para eso está el botón
- * de consultar a mano en vez de seguir girando para siempre.
+ * El cobro no lo confirma esta página: lo confirma el webhook que la pasarela le
+ * manda al servidor, normalmente en segundos. Acá solo se sondea el estado ya
+ * escrito, y se sigue sondeando **hasta que haya un desenlace** (pagado, cancelado
+ * o anulado): el visitante ve la carga en vez de un "pendiente" que lo hace dudar
+ * de si pagó. Pasados los primeros dos minutos el ritmo baja, para no martillar al
+ * servidor con una pestaña olvidada abierta.
  */
-const INTERVALO_MS = 3000
-const INTENTOS_MAXIMOS = 40
+const INTERVALO_RAPIDO_MS = 3000
+const INTENTOS_RAPIDOS = 40
+const INTERVALO_LENTO_MS = 10000
+
+/** Hay desenlace: ya no tiene sentido seguir consultando. */
+function esFinal(res: RespuestaEstadoCheckout): boolean {
+  return res.pagado || res.anulado || res.estadoPago === 'CANCELADO'
+}
 
 function ContenidoPagoExito() {
   const searchParams = useSearchParams()
@@ -44,66 +51,66 @@ function ContenidoPagoExito() {
     searchParams.get('id_checkout') ||
     searchParams.get('id')
 
-  const [cargando, setCargando] = useState<boolean>(true)
-  const [consultando, setConsultando] = useState<boolean>(false)
   const [resultado, setResultado] = useState<RespuestaEstadoCheckout | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [errorFatal, setErrorFatal] = useState<string | null>(null)
+  const [demorado, setDemorado] = useState<boolean>(false)
   const [copiado, setCopiado] = useState<boolean>(false)
-  const [sondeoAgotado, setSondeoAgotado] = useState<boolean>(false)
 
-  // En una ref y no en el estado: el temporizador lo lee dentro del intervalo y no
-  // debe reiniciarlo al cambiar.
-  const intentos = useRef<number>(0)
-
-  const consultar = useCallback(
-    async (id: string, manual: boolean = false): Promise<boolean> => {
-      if (manual) {
-        setConsultando(true)
-        setSondeoAgotado(false)
-        intentos.current = 0
+  /** Devuelve `true` cuando ya no hay que seguir consultando. */
+  const consultar = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const res = await api.pagos.estadoDeCheckout(id)
+      setResultado(res)
+      if (res.pagado) toast.success('Pago realizado exitosamente')
+      return esFinal(res)
+    } catch (err: unknown) {
+      // Un 4xx (checkout inexistente, id mal formado) no se arregla reintentando. El
+      // 429 sí: es el límite de peticiones y basta con esperar.
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429) {
+        setErrorFatal(err.message || 'No se pudo consultar el estado del pago')
+        return true
       }
-      setError(null)
-
-      try {
-        const res = await api.pagos.estadoDeCheckout(id)
-        setResultado(res)
-        if (res.pagado) toast.success('Pago realizado exitosamente')
-        return res.pagado
-      } catch (err: unknown) {
-        const mensaje =
-          err instanceof Error ? err.message : 'No se pudo consultar el estado del pago'
-        setError(mensaje)
-        return false
-      } finally {
-        setCargando(false)
-        setConsultando(false)
-      }
-    },
-    [],
-  )
+      // Red caída o error del servidor: transitorio, se sigue esperando en silencio.
+      return false
+    }
+  }, [])
 
   useEffect(() => {
     if (!checkoutId) {
-      setCargando(false)
-      setError('No se proporcionó un identificador de cobro (checkout_id).')
+      setErrorFatal('No se proporcionó un identificador de cobro (checkout_id).')
       return
     }
 
     let vivo = true
+    let terminado = false
+    let enCurso = false
+    let intentos = 0
     let temporizador: ReturnType<typeof setTimeout> | undefined
 
     const ciclo = async () => {
-      const pagado = await consultar(checkoutId)
-      if (!vivo || pagado) return
+      if (!vivo || terminado || enCurso) return
+      if (temporizador) clearTimeout(temporizador)
 
-      intentos.current += 1
-      if (intentos.current >= INTENTOS_MAXIMOS) {
-        setSondeoAgotado(true)
-        return
-      }
-      temporizador = setTimeout(ciclo, INTERVALO_MS)
+      enCurso = true
+      terminado = await consultar(checkoutId)
+      enCurso = false
+      if (!vivo || terminado) return
+
+      intentos += 1
+      if (intentos === INTENTOS_RAPIDOS) setDemorado(true)
+      temporizador = setTimeout(
+        ciclo,
+        intentos < INTENTOS_RAPIDOS ? INTERVALO_RAPIDO_MS : INTERVALO_LENTO_MS,
+      )
     }
 
+    // El navegador del celular congela los temporizadores con la pestaña en segundo
+    // plano. Al volver a ella se consulta en el acto en vez de esperar el siguiente.
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void ciclo()
+    }
+
+    document.addEventListener('visibilitychange', alVolver)
     void ciclo()
 
     // Corta el sondeo al salir de la página: sin esto, seguiría consultando contra un
@@ -111,6 +118,7 @@ function ContenidoPagoExito() {
     return () => {
       vivo = false
       if (temporizador) clearTimeout(temporizador)
+      document.removeEventListener('visibilitychange', alVolver)
     }
   }, [checkoutId, consultar])
 
@@ -127,29 +135,8 @@ function ContenidoPagoExito() {
     window.location.replace('https://www.google.com')
   }
 
-  // Estado: primera consulta en curso
-  if (cargando) {
-    return (
-      <Card className="w-full max-w-lg bg-card border-border/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-        <CardContent className="p-8 flex flex-col items-center justify-center text-center space-y-4">
-          <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center ring-8 ring-primary/5">
-            <Spinner className="h-10 w-10 text-primary" />
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-xl font-bold tracking-tight text-foreground">
-              Confirmando tu pago
-            </h2>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              Estamos esperando la confirmación del banco. Normalmente tarda unos segundos.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
   // Estado: no se pudo consultar (sin parámetro, o el checkout no existe)
-  if (error && !resultado) {
+  if (errorFatal) {
     return (
       <Card className="w-full max-w-lg bg-card border-destructive/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
         <CardHeader className="text-center pb-2 pt-6">
@@ -159,7 +146,7 @@ function ContenidoPagoExito() {
           <CardTitle className="text-xl text-foreground font-bold">
             No pudimos consultar el pago
           </CardTitle>
-          <CardDescription className="text-muted-foreground text-sm">{error}</CardDescription>
+          <CardDescription className="text-muted-foreground text-sm">{errorFatal}</CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-4">
           <div className="p-4 rounded-xl bg-muted/40 border border-border/60 text-xs text-muted-foreground space-y-2 text-left">
@@ -179,11 +166,10 @@ function ContenidoPagoExito() {
 
           {checkoutId && (
             <Button
-              onClick={() => void consultar(checkoutId, true)}
-              disabled={consultando}
+              onClick={() => window.location.reload()}
               className="w-full h-11 font-semibold gap-2 cursor-pointer shadow-md"
             >
-              {consultando ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+              <RefreshCw className="h-4 w-4" />
               Consultar de nuevo
             </Button>
           )}
@@ -192,61 +178,32 @@ function ContenidoPagoExito() {
     )
   }
 
-  // Estado: el cobro aún no está confirmado, o quedó cancelado
-  if (resultado && !resultado.pagado) {
-    const cancelado = resultado.estadoPago === 'CANCELADO'
+  // Estado: el cobro falló o el pase se anuló. Es un desenlace: ya no se consulta.
+  if (resultado && !resultado.pagado && esFinal(resultado)) {
     const anulado = resultado.anulado
 
     return (
-      <Card className="w-full max-w-lg bg-card border-amber-500/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
+      <Card className="w-full max-w-lg bg-card border-destructive/30 shadow-2xl overflow-hidden animate-in fade-in duration-300">
         <CardHeader className="text-center pb-2 pt-6">
-          <div className="h-16 w-16 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-2 ring-8 ring-amber-500/5">
-            <AlertTriangle className="h-9 w-9" />
+          <div className="h-16 w-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto mb-2 ring-8 ring-destructive/5">
+            {anulado ? <AlertTriangle className="h-9 w-9" /> : <XCircle className="h-9 w-9" />}
           </div>
           <CardTitle className="text-xl text-foreground font-bold">
-            {anulado
-              ? 'Este pase fue anulado'
-              : cancelado
-                ? 'El cobro no se completó'
-                : 'Aún no confirmamos tu pago'}
+            {anulado ? 'Este pase fue anulado' : 'El pago no se completó'}
           </CardTitle>
           <CardDescription className="text-muted-foreground text-sm">
             {anulado
               ? 'Aunque el cobro figure registrado, el pase ya no es válido. Consulta en taquilla.'
-              : cancelado
-                ? 'El banco no autorizó la transacción. No se te cobró nada.'
-                : 'El banco todavía no nos ha confirmado la transacción.'}
+              : 'El banco no autorizó la transacción. No se te cobró nada. Puedes intentarlo de nuevo con el mismo link de pago.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-4">
-          {!cancelado && !anulado && (
-            <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.08] p-4 text-xs text-amber-800 dark:text-amber-300 space-y-2">
-              <p className="font-semibold text-sm">⏳ Transacción en proceso</p>
-              <p className="leading-relaxed">
-                {sondeoAgotado
-                  ? 'La confirmación está tardando más de lo normal. Vuelve a consultar, y si sigue igual presenta tu comprobante en taquilla.'
-                  : 'Esta pantalla se actualiza sola en cuanto el banco confirme. No cierres la ventana.'}
-              </p>
-            </div>
-          )}
-
           <div className="rounded-xl border border-border/60 bg-muted/30 p-3.5 flex items-center justify-between">
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               No. de Ticket
             </span>
             <span className="font-mono text-sm font-bold text-foreground">{resultado.folio}</span>
           </div>
-
-          {checkoutId && !cancelado && !anulado && (
-            <Button
-              onClick={() => void consultar(checkoutId, true)}
-              disabled={consultando}
-              className="w-full h-11 font-semibold gap-2 cursor-pointer shadow-md bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              {consultando ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
-              Consultar de nuevo
-            </Button>
-          )}
 
           <Button
             variant="outline"
@@ -256,10 +213,38 @@ function ContenidoPagoExito() {
             <X className="h-4 w-4" />
             Terminar
           </Button>
+        </CardContent>
+      </Card>
+    )
+  }
 
-          <p className="text-[11px] text-center text-muted-foreground">
-            Tu ticket no permite el ingreso hasta que el pago figure como <strong>PAGADO</strong>.
-          </p>
+  // Estado: esperando la confirmación. Se queda aquí hasta que haya desenlace.
+  if (!resultado?.pagado) {
+    return (
+      <Card className="w-full max-w-lg bg-card border-border/60 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+        <CardContent className="p-8 flex flex-col items-center justify-center text-center space-y-4">
+          <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center ring-8 ring-primary/5">
+            <Spinner className="h-10 w-10 text-primary" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-bold tracking-tight text-foreground">
+              Confirmando tu pago
+            </h2>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              {demorado
+                ? 'La confirmación del banco está tardando más de lo normal. No cierres esta ventana: se actualizará sola en cuanto llegue.'
+                : 'Estamos esperando la confirmación del banco. Normalmente tarda unos segundos.'}
+            </p>
+          </div>
+
+          {resultado?.folio && (
+            <div className="w-full rounded-xl border border-border/60 bg-muted/30 p-3.5 flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                No. de Ticket
+              </span>
+              <span className="font-mono text-sm font-bold text-foreground">{resultado.folio}</span>
+            </div>
+          )}
         </CardContent>
       </Card>
     )
