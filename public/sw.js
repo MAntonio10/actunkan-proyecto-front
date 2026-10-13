@@ -14,7 +14,8 @@
  * explícito y está fechado.
  */
 
-const VERSION = 'actunkan-v9'
+// v10: borra los cachés de v9, que guardaron respuestas de la API por error.
+const VERSION = 'actunkan-v10'
 const CACHE_SHELL = `${VERSION}-shell`
 const CACHE_ESTATICOS = `${VERSION}-estaticos`
 const PAGINA_SIN_CONEXION = '/sin-conexion.html'
@@ -99,10 +100,21 @@ self.addEventListener('activate', (evento) => {
   )
 })
 
-/** Todo lo que va al backend queda fuera del worker, sin excepciones. */
+/**
+ * Todo lo que va al backend queda fuera del worker, sin excepciones.
+ *
+ * En producción la API vive en el MISMO dominio, detrás de nginx en `/api/`
+ * (`https://dominio/api/pagos/...`), así que la comparación de origen no la
+ * atrapa: sin el prefijo `api/` estas peticiones caían al manejador de
+ * "caché primero" y la primera respuesta se servía para siempre —la página de
+ * pago esperando una confirmación que ya estaba en la base, la caja abierta que
+ * no aparecía hasta un Ctrl+F5—. En desarrollo la API está en otro puerto y la
+ * regla de origen sí la excluye, por eso no se veía en local.
+ */
 function esLlamadaApi(url) {
   return (
     url.origin !== self.location.origin ||
+    url.pathname.startsWith('/api/') ||
     /^\/(auth|tickets|usuarios|puestos|modulos|acciones|modulo-acciones|bitacora|tarifas|guias|cajas|gastos|tipos-gasto|donaciones|actividades|sectores|reportes|pagos)(\/|$)/.test(
       url.pathname,
     )
