@@ -5,11 +5,10 @@ import {
   LockOpen,
   Lock,
   Ban,
+
+  RefreshCw,
   AlertTriangle,
   DollarSign,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -47,14 +46,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { Paginador } from "@/componentes/paginador";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { type AperturaCajaBackend } from "@/tipos";
+import { formatearFechaApi } from "@/lib/fecha_guatemala";
 
 const TODOS = "todos";
 
-/** Tamaño de página. El backend acepta hasta 200; 50 es su valor por omisión y
- *  el mismo que usa el historial de cierres, la pantalla hermana. */
-const LIMITE = 50;
+/** Tamaño de página, igual en las siete pantallas de listado del sistema. */
+const LIMITE = 20;
 
 interface Props {
   /** Cambia al abrir, cerrar o reabrir una caja, para recargar. */
@@ -75,7 +75,7 @@ function formatearFechaHora(valor?: string): string {
   if (!valor) return "—";
   const fecha = new Date(valor);
   if (isNaN(fecha.getTime())) return "—";
-  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+  return formatearFechaApi(valor);
 }
 
 function estaAbierta(a: AperturaCajaBackend): boolean {
@@ -181,7 +181,7 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
             <div className="space-y-1">
               <Label className="text-[11px] text-muted-foreground">Estado</Label>
               <Select value={estado} onValueChange={setEstado}>
-                <SelectTrigger className="h-9 w-[130px] text-xs bg-muted/40 border-border/60">
+                <SelectTrigger className="h-9 w-full sm:w-[130px] text-xs bg-muted/40 border-border/60">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -270,10 +270,10 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
                             key={a.id}
                             className={cn(
                               a.anulado
-                                ? "bg-destructive/[0.06] border-l-4 border-l-destructive opacity-75"
+                                ? "bg-destructive/[0.06] opacity-75"
                                 : abierta
-                                  ? "bg-emerald-500/[0.07] border-l-4 border-l-emerald-500"
-                                  : "hover:bg-muted/20 border-l-4 border-l-transparent",
+                                  ? "bg-emerald-500/[0.07]"
+                                  : "hover:bg-muted/20",
                             )}
                           >
                             <TableCell className="text-xs whitespace-nowrap">
@@ -363,9 +363,9 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
                         className={cn(
                           "p-4 rounded-xl border space-y-3 shadow-sm",
                           a.anulado
-                            ? "border-destructive/40 bg-destructive/[0.06] border-l-4 border-l-destructive"
+                            ? "border-destructive/40 bg-destructive/[0.06]"
                             : abierta
-                              ? "border-emerald-500/40 bg-emerald-500/[0.07] border-l-4 border-l-emerald-500"
+                              ? "border-emerald-500/40 bg-emerald-500/[0.07]"
                               : "border-border/60 bg-card",
                         )}
                       >
@@ -434,35 +434,14 @@ export function HistorialAperturasCaja({ refrescarToken, onCambio }: Props) {
                 )}
               </div>
 
-              {total > LIMITE && (
-                <div className="flex items-center justify-between pt-2">
-                  <p className="text-xs text-muted-foreground">
-                    Página {pagina} de {totalPaginas} · {total} aperturas
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                      disabled={pagina <= 1 || cargando}
-                      className="gap-1 cursor-pointer"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                      disabled={pagina >= totalPaginas || cargando}
-                      className="gap-1 cursor-pointer"
-                    >
-                      Siguiente
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Paginador
+                pagina={pagina}
+                totalPaginas={totalPaginas}
+                total={total}
+                etiqueta="aperturas"
+                cargando={cargando}
+                onCambiar={setPagina}
+              />
             </>
           )}
         </CardContent>

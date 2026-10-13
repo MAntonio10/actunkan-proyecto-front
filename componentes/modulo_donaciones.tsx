@@ -3,16 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   HandHeart,
-  Banknote,
+  Receipt,
   Search,
   FileText,
   Ban,
   History,
   Plus,
-  Users,
   AlertCircle,
-  ChevronLeft,
-  ChevronRight,
   Calendar,
   MoreVertical,
 } from "lucide-react";
@@ -53,6 +50,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { Paginador } from "@/componentes/paginador";
+import { TarjetaEstadistica } from '@/componentes/tarjeta_estadistica';
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { usePdfDocumento } from "@/hooks/use_pdf_ticket";
 import {
@@ -60,8 +59,9 @@ import {
   type MetricasDonaciones,
   type AperturaCajaBackend,
 } from "@/tipos";
+import { formatearFechaApi } from "@/lib/fecha_guatemala";
 
-const LIMITE = 50;
+const LIMITE = 20;
 
 function aNumero(valor: string | number | undefined | null): number {
   const n = typeof valor === "string" ? parseFloat(valor) : valor;
@@ -76,7 +76,7 @@ function formatearFechaHora(valor?: string): string {
   if (!valor) return "—";
   const fecha = new Date(valor);
   if (isNaN(fecha.getTime())) return "—";
-  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+  return formatearFechaApi(valor);
 }
 
 export function ModuloDonaciones() {
@@ -227,39 +227,30 @@ export function ModuloDonaciones() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card className="bg-card border-primary/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <Users className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Recibos emitidos
-              </p>
-              <p className="text-2xl font-bold text-primary">{metricas?.totalRecibos ?? "—"}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-emerald-500/10 border-emerald-500/30">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0">
-              <Banknote className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Monto recaudado
-              </p>
-              <p className="text-2xl font-bold text-emerald-600">
-                {metricas ? moneda(metricas.montoRecaudado) : "—"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-4">
+          <TarjetaEstadistica
+            etiqueta="Recibos emitidos"
+            valor={metricas?.totalRecibos ?? '—'}
+            icono={Receipt}
+            tono="primary"
+          />
+          <TarjetaEstadistica
+            etiqueta="Monto recaudado"
+            valor={metricas ? `Q${parseFloat(metricas.montoRecaudado).toFixed(2)}` : '—'}
+            icono={HandHeart}
+            tono="positivo"
+            pie={
+              metricas && metricas.totalRecibos > 0
+                ? `Q${(parseFloat(metricas.montoRecaudado) / metricas.totalRecibos).toFixed(2)} por recibo`
+                : undefined
+            }
+          />
       </div>
 
-      <Tabs value={pestana} onValueChange={setPestana}>
+      {/* Sin permiso de Crear no existe la pestaña "Registrar", así que el valor
+          se fuerza a "historial": si no, la única pestaña visible se dibujaría
+          sin resaltar, como si nada estuviera seleccionado. */}
+      <Tabs value={puedeCrear ? pestana : "historial"} onValueChange={setPestana}>
         <TabsList className="grid grid-cols-2 w-full sm:w-[340px] bg-muted p-1 gap-1">
           {puedeCrear && (
             <TabsTrigger value="registro" className="gap-2 font-semibold cursor-pointer">
@@ -310,6 +301,7 @@ export function ModuloDonaciones() {
                 <Input
                   id="monto-donacion"
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   step="0.01"
                   placeholder="0.00"
@@ -640,35 +632,14 @@ export function ModuloDonaciones() {
                   )}
                 </div>
 
-                {total > LIMITE && (
-                  <div className="flex items-center justify-between pt-2">
-                    <p className="text-xs text-muted-foreground">
-                      Página {pagina} de {totalPaginas} · {total} recibos
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                        disabled={pagina <= 1}
-                        className="gap-1 cursor-pointer"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                        Anterior
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                        disabled={pagina >= totalPaginas}
-                        className="gap-1 cursor-pointer"
-                      >
-                        Siguiente
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                <Paginador
+                  pagina={pagina}
+                  totalPaginas={totalPaginas}
+                  total={total}
+                  etiqueta="recibos"
+                  cargando={cargandoLista}
+                  onCambiar={setPagina}
+                />
               </>
             )}
           </CardContent>

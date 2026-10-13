@@ -146,7 +146,9 @@ El sistema se organiza en **módulos generales**, que pueden agrupar **sub-módu
 
 Para que ocultarlos no rompa el menú, este **no** depende de un permiso: usa `GET /modulos/mis-modulos` (ver 4.7), que solo exige sesión válida.
 
-Pendientes de implementar (aún sin código): `Donaciones`, `Sincronizacion`, `Reportes`, `ActividadesParque`.
+⚠️ Esta copia está incompleta: le faltan secciones enteras que sí tiene la del repositorio del backend (§14 Guías, §15 Donaciones, §16 Actividades del Parque, §17 Sectores, §19 Reportes, §11.5-11.6 y el control de arqueo). Verifique contra `actunkan-backend/DOCUMENTACION_ENDPOINTS.md` antes de concluir que algo no existe.
+
+Aquí decía que `Donaciones`, `Sincronizacion`, `Reportes` y `ActividadesParque` estaban «pendientes de implementar (aún sin código)». **Es falso**: los cuatro están implementados, son asignables y el front los consume (`app/donaciones`, `app/reportes`, `app/actividades`, `app/sincronizacion`).
 
 - **Acciones:** `'Ver'`, `'Crear'`, `'Editar'`, `'Anular'`, `'Exportar'`
 - Un handler **sin** `@RequirePermission` queda accesible a cualquier usuario autenticado (`permissions.guard.ts` es fail-open por diseño), así que toda ruta nueva debe declararlo explícitamente.
@@ -1027,16 +1029,20 @@ Devuelve los módulos a los que el usuario de la sesión tiene acceso, con las a
 ## 7. Bitácora y Auditoría (`/bitacora`)
 
 ### 7.1 `GET /bitacora` (Listar Bitácora de Actividades)
-Obtiene los registros de auditoría ordenados descendentemente por fecha en huso horario **UTC-6**.
+Obtiene los registros de auditoría ordenados por fecha en huso horario **UTC-6** — descendente por omisión, configurable con `orden`.
 
 * **Permiso requerido:** `Módulo: 'Bitacora'`, `Acción: 'Ver'`
 * **Query Params (Todos opcionales):**
   - `idUsuario` (número): Filtrar por ID de usuario ejecutor.
+  - `buscar` (texto): Búsqueda parcial sobre `descripcion`, `accion`, `modulo`, `usuarioNombre` y el correo del ejecutor; basta que uno coincida. **Se combina** con los demás filtros (`?modulo=Cajas&buscar=anular` exige ambos) y `total` la respeta, así que el paginador queda correcto.
+    Buscar un correo puede devolver más registros que los de ese usuario, porque también alcanza las descripciones que lo mencionan (una edición *sobre* esa persona, no *por* ella). Es el comportamiento buscado.
+    Rendimiento: `contains` sobre `descripcion` se traduce a `LIKE '%texto%'` y no aprovecha índice. Con el volumen actual es irrelevante; si la tabla creciera un orden de magnitud, lo que escala es acotar primero por `modulo`, `idUsuario` o rango de fechas — esos índices sí existen — y dejar la búsqueda libre como refinamiento.
   - `modulo` (texto): Filtrar por módulo. **Coincide por `contains`, no por igualdad**: pedir `Tickets` devuelve también los de `EmisionTickets`.
     El campo lo escribe cada service como texto libre, **no es una llave foránea a `Modulo`** y sus valores no coinciden con esa tabla. Los que existen hoy son: `ActividadesParque`, `Auth`, `Cajas`, `Donaciones`, `EmisionTickets`, `Gastos`, `Modulos`, `Reportes`, `Tarifas`, `Tickets`, `TiposGasto`, `Usuarios`. No pueble un desplegable desde `GET /modulos`: perdería `Tickets` y `Auth`, y ofrecería módulos sin ningún registro.
   - `accion` (texto): Filtrar por tipo de acción. Hay 45 distintas; las de mayor volumen son `GENERAR_REPORTE`, `EXPORTAR_REPORTE`, `RESERVAR_FOLIOS_OFFLINE`, `ANULAR_TICKET` y `VALIDAR_TICKET`. Si algún día se expone este filtro en la interfaz, esos son los que valen la pena ofrecer; `CREAR_USUARIO` o `EDITAR_PUESTO` existen pero son marginales.
   - `fechaInicio` (ISO Date string): Filtrar desde fecha.
   - `fechaFin` (ISO Date string): Filtrar hasta fecha.
+  - `orden` (`asc` | `desc`, defecto `desc`): Sentido del orden por fecha. Cualquier otro valor responde 400. El desempate por `id` acompaña al sentido de la fecha en vez de quedar fijo: en la bitácora casi todos los segundos están repetidos, así que con `id` fijo el listado se vería ordenado pero dentro de cada segundo las filas saldrían al revés. **No invierta el arreglo en el cliente**: eso reordena solo la página visible y aparenta ser un orden global.
   - `limite` (número, defecto `100`, máx. `200`): Tamaño de la página.
   - `pagina` (número, defecto `1`).
 
@@ -1565,18 +1571,26 @@ Notas de uso:
 
 Permite vender tickets **sin conexión a internet**, entregando al visitante un pase con QR **válido desde el momento de la venta**.
 
-La idea es simple: el servidor entrega **folios pre-firmados** mientras hay red; el dispositivo los consume después, sin ella; al reconectar sube la cola y cada folio se convierte en un ticket real.
+**Hay dos modelos y solo uno está vigente.** Esta sección documenta los dos porque el backend mantiene vivos los endpoints de ambos, pero el front implementa únicamente el segundo.
 
-Diseño completo en `ESPECIFICACION_OFFLINE.md`.
+**El modelo vigente: cada taquilla firma sus propios pases.** En su primera conexión el dispositivo genera un par de llaves ECDSA P-256 —la privada **no extraíble**, en IndexedDB—, registra la pública con `POST /dispositivos` (§18.0) y recibe una `serie` (`D01`, `D02`…) con su `ultimoCorrelativo`. Desde ahí numera y firma sus folios sin red, así que no se le pueden agotar. Al reconectar sube la cola con `POST /tickets/emitir-offline` (§18.3).
 
-### Conceptos
+**El modelo anterior: folios pre-firmados por lote.** El servidor firmaba un bloque de folios con HMAC por adelantado, porque solo él tenía el secreto. Está **fuera del front**; el backend conserva sus endpoints (§18.1, §18.2, §18.4) solo para drenar la cola de algún dispositivo que no se haya actualizado.
+
+Lo que comparten los dos: la semántica de la cola, la idempotencia por `idLocal`, el resultado **por ítem**, el acotado de la fecha, y que sin conexión solo se vende en efectivo. Lo que cambia: quién numera el folio, quién lo firma y con qué, y que en el modelo vigente no hay lote ni conciliación — el dispositivo le dice al servidor contra qué caja cuadra (§18.0).
+
+> ⚠️ `ESPECIFICACION_OFFLINE.md` describe el modelo por **lote** como *el* diseño y no se reescribió. Sirve para el *porqué* de lo que no cambió; todo lo que diga de lotes, reserva de folios o conciliación es historia.
+
+### Conceptos (solo del modelo por lote)
+
+Nada de esta tabla ni del diagrama de estados aplica al modelo vigente: ahí no hay `FolioReservado` ni lote, el número lo lleva el propio dispositivo en su serie.
 
 | Término | Qué es |
 |---|---|
 | **Folio reservado** | Un número de ticket con su firma HMAC, generado **antes** de que exista la venta |
 | **Lote** | Un bloque de folios, atado a un usuario, un dispositivo y **la caja abierta al reservarlo** |
 
-Estados del folio:
+Estados del folio (modelo por lote):
 
 ```
                     ┌─── conciliar ──────────> NO_UTILIZADO
@@ -1592,6 +1606,18 @@ RESERVADO ──────────┼─── invalidar el lote ──> I
 
 ---
 
+
+### 18.0 `POST /dispositivos` (Habilitar la taquilla para firmar sus pases)
+
+Alta **idempotente** por `idDispositivo`: volver a registrar el mismo equipo no crea otra taquilla, devuelve su estado actual. El front lo vuelve a llamar cada vez que se abre la pantalla de emisión, que es la forma más barata de enterarse de que la taquilla fue revocada.
+
+* **Permiso requerido:** `Módulo: 'Sincronizacion'`, `Acción: 'Ver'`
+* **Body:** `{ idDispositivo, nombre?, llavePublica }` — la pública en SPKI base64.
+* **Respuesta:** `{ id, idDispositivo, nombre, serie, ultimoCorrelativo, revocado, caja: { id, fechaCreacion } }`
+
+**`409` con `codigo: 'SIN_CAJA_ABIERTA'` si no hay caja abierta.** Es el control que evita el peor caso del modo sin conexión: antes el equipo se armaba sin caja, el taquillero cobraba el turno entero y el rechazo llegaba al subir la cola, con el dinero ya en el cajón. El alta es el único momento con red y sin dinero en juego. El front lo distingue con `esSinCajaAbierta()` (`lib/dispositivo_taquilla.ts`) y lo muestra como advertencia en ámbar diciendo qué hacer —abrir una caja con conexión—, no como un error genérico; **y no entra al modo sin conexión**.
+
+**`caja` viene en esta respuesta a propósito**: no pida `GET /cajas/actual` aparte. Ese segundo viaje puede fallar justo cuando la red se está cayendo, y el equipo quedaría armado sin saber contra qué cuadra. Su `fechaCreacion` es **hora de pared**, como todo lo que viene de la API.
 ### 18.1 `POST /tickets/lotes-offline` (Reservar folios)
 * **Permiso requerido:** `Módulo: 'EmisionTickets'`, `Acción: 'Crear'`
 * **Request Body (JSON):**
@@ -1720,8 +1746,14 @@ Todo lo que va después de `montoCobrado` es el payload de `POST /tickets/emitir
 | `LOTE_INVALIDADO` | El lote se invalidó; ninguna venta suya puede subirse |
 | `PAGO_NO_EFECTIVO` | Offline solo se vende en efectivo |
 | `CATALOGO_INVALIDO` | Datos de la venta inválidos (atracción, país, categoría…) |
+| `ERROR_INTERNO` | **El servidor falló, la venta está bien.** El único rechazo que se reintenta: conservar en la cola, nunca descartar |
 
 > El resultado **por ítem** es lo que le permite al frontend distinguir *"no hubo red, reintento"* de *"el servidor lo rechazó, aviso al taquillero y no reintento"*. Sin esa distinción, la cola reintenta para siempre una venta que nunca va a entrar.
+
+**`ERROR_INTERNO` es el único rechazo que no es terminal.** No es un problema del dato: es el servidor fallando por su cuenta. El cliente la deja en `estado: 'pendiente'`, la reintenta más tarde y **no ofrece descartarla**; sigue contando en `recaudacionSinSubir()` y por lo tanto sigue frenando el cierre de caja, que es lo correcto porque el dinero ya se cobró.
+
+Existe porque antes cualquier fallo no previsto del backend salía como `CATALOGO_INVALIDO`: eso manda a revisar la atracción y el país de una venta que estaba bien y, siendo un rechazo del servidor —que por contrato no se reintenta—, invitaba a **descartar dinero cobrado por un bug ajeno**. Pasó de verdad con un `folioReservado.update()` que recibía `id: null`. El detalle del fallo va al log del servidor, no al cuerpo: adentro no hay nada que el taquillero pueda arreglar.
+
 
 #### Reglas que aplica el servidor
 

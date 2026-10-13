@@ -53,10 +53,10 @@ const MAXIMO = 500
  */
 const EJEMPLOS = [
   '¿Qué guía trabajó más los sábados este año?',
-  'Las 3 horas de más venta en el mariposario',
-  'Ventas por atracción cruzadas por país este año',
+  'Las 3 horas de más recaudación en el mariposario',
+  'Recaudación por atracción cruzada por país este año',
   'Tickets de agosto y septiembre, mes por mes',
-  'Los 5 vendedores que más recaudaron en recorrido largo',
+  'Los 5 colaboradores que más recaudaron en recorrido largo',
 ]
 
 /** Cambia el formato de una URL de descarga sin volver a interpretar. */
@@ -149,7 +149,7 @@ export function PeticionReporteIA({ puedeExportar }: { puedeExportar: boolean })
                   value={instruccion}
                   onChange={(evento) => setInstruccion(evento.target.value.slice(0, MAXIMO))}
                   onKeyDown={alPresionarTecla}
-                  placeholder="Ej.: ventas del vendedor Juan en las cuevas en agosto, desglosadas por día"
+                  placeholder="Ej.: recaudación del colaborador Juan en las cuevas en agosto, desglosada por día"
                   rows={2}
                   disabled={pidiendo}
                   aria-label="Petición para la IA"

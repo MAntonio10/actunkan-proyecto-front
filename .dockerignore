@@ -1,0 +1,20 @@
+node_modules
+.next
+out
+
+# Secretos: las NEXT_PUBLIC_* entran como build-arg, no como archivo.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.vscode
+.claude
+
+*.md
+docs
+*.log
+
+Dockerfile
+.dockerignore

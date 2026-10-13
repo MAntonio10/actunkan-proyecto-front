@@ -15,6 +15,7 @@ import { LogosInstitucionales } from './logos_institucionales'
 import { type TicketBackend } from '@/tipos'
 import { type DatosTicketPreview } from './formulario_visitante_completo'
 import { CodigoQR } from './codigo_qr'
+import { fechaIsoEnGuatemala } from '@/lib/fecha_guatemala'
 import { esPagoPendiente } from '@/lib/utils_pagos'
 
 interface PaseAccesoProps {
@@ -31,7 +32,7 @@ function IconoAtraccion({ codigo }: { codigo?: string }) {
 }
 
 export function PaseAcceso({ preview, ticketsEmitidos, fecha }: PaseAccesoProps) {
-  const fechaFormateada = useMemo(() => fecha.toISOString().split('T')[0], [fecha])
+  const fechaFormateada = useMemo(() => fechaIsoEnGuatemala(fecha), [fecha])
 
   const emitidos = ticketsEmitidos || []
   const tieneEmitidos = emitidos.length > 0
@@ -40,9 +41,9 @@ export function PaseAcceso({ preview, ticketsEmitidos, fecha }: PaseAccesoProps)
     <Card className="bg-card border-border/50 overflow-hidden">
       <CardContent className="p-0">
         {/* Cabecera del pase */}
-        <div className="flex flex-col items-center pt-5 pb-3 border-b border-dashed border-border/50 px-4">
-          <LogosInstitucionales tamano="md" className="mb-1.5" />
-          <h2 className="text-xl font-bold tracking-tight">ACTÚN KAN</h2>
+        <div className="flex flex-col items-center pt-3 pb-2 border-b border-dashed border-border/50 px-4">
+          <LogosInstitucionales tamano="sm" className="mb-1" />
+          <h2 className="text-base font-bold tracking-tight">ACTÚN KAN</h2>
           <span className="text-xs uppercase tracking-wider text-primary font-medium">
             Pase de Acceso
           </span>
@@ -73,18 +74,18 @@ export function PaseAcceso({ preview, ticketsEmitidos, fecha }: PaseAccesoProps)
               </div>
 
               {emitidos.map((t) => (
-                <TabsContent key={t.id} value={String(t.id)} className="p-6 space-y-4 m-0">
+                <TabsContent key={t.id} value={String(t.id)} className="p-4 space-y-2 m-0">
                   <TicketEmitidoRender ticket={t} fechaFormateada={fechaFormateada} />
                 </TabsContent>
               ))}
             </Tabs>
           ) : (
-            <div className="p-6 space-y-4">
+            <div className="p-4 space-y-2">
               <TicketEmitidoRender ticket={emitidos[0]} fechaFormateada={fechaFormateada} />
             </div>
           )
         ) : (
-          <div className="p-6 space-y-4">
+          <div className="p-4 space-y-2">
             <VistaPrevia preview={preview} fechaFormateada={fechaFormateada} />
           </div>
         )}
@@ -129,7 +130,7 @@ function TicketEmitidoRender({
       )}
 
       {/* Folio real generado por el servidor */}
-      <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-2.5 flex items-center justify-between shadow-xs">
+      <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-2 flex items-center justify-between shadow-xs">
         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
           No. Ticket
         </span>
@@ -139,7 +140,7 @@ function TicketEmitidoRender({
       </div>
 
       {ticket.atraccion && (
-        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-2.5 flex items-center justify-between shadow-xs">
+        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-2 flex items-center justify-between shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Atracción
           </span>
@@ -154,17 +155,17 @@ function TicketEmitidoRender({
         <span className="text-xs uppercase tracking-wider text-muted-foreground">
           {esGuia ? 'Nombre del Guía' : 'Titular / Grupo'}
         </span>
-        <p className="text-xl font-bold mt-0.5 tracking-wide text-foreground">
+        <p className="text-base font-bold mt-0.5 tracking-wide text-foreground">
           {ticket.nombre || ticket.guia?.nombre || '...'}
         </p>
       </div>
 
       {!esGuia && ticket.guia && (
-        <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-0.5">
+        <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-2 space-y-0">
           <span className="text-[10px] uppercase font-bold tracking-wider text-primary block">
             Guía Acompañante
           </span>
-          <p className="text-base font-extrabold text-foreground tracking-wide uppercase">
+          <p className="text-sm font-extrabold text-foreground tracking-wide uppercase">
             {ticket.guia.nombre}
           </p>
           <p className="text-[11px] text-muted-foreground font-medium">
@@ -176,13 +177,13 @@ function TicketEmitidoRender({
       <div className="flex justify-between items-start">
         <div>
           <span className="text-xs uppercase tracking-wider text-muted-foreground">Fecha</span>
-          <p className="font-semibold text-base mt-0.5">{fechaFormateada}</p>
+          <p className="font-semibold text-sm mt-0.5">{fechaFormateada}</p>
         </div>
         <div className="text-right">
           <span className="text-xs uppercase tracking-wider text-muted-foreground">
             {esGuia ? 'Acceso' : 'Personas'}
           </span>
-          <p className="font-semibold text-base mt-0.5">
+          <p className="font-semibold text-sm mt-0.5">
             {esGuia ? '1 Guía (Sin Carnet)' : `${ticket.cantidadPersonas} Pax`}
           </p>
         </div>
@@ -191,7 +192,7 @@ function TicketEmitidoRender({
       {ticket.origen && (
         <div>
           <span className="text-xs uppercase tracking-wider text-muted-foreground">Origen</span>
-          <p className="text-primary font-bold text-base mt-0.5">
+          <p className="text-primary font-bold text-sm mt-0.5">
             {ticket.origen.nombre}
             {ticket.pais ? ` · ${ticket.pais.nombre}` : ''}
           </p>
@@ -199,7 +200,7 @@ function TicketEmitidoRender({
       )}
 
       {opcionPago && (
-        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-3 flex items-center justify-between shadow-xs">
+        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-2 flex items-center justify-between shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Monto Pagado
           </span>
@@ -210,7 +211,7 @@ function TicketEmitidoRender({
       )}
 
       {/* Separador punteado estilo ticket */}
-      <div className="relative py-2">
+      <div className="relative py-1">
         <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-background" />
         <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-6 h-6 rounded-full bg-background" />
         <div className="border-t border-dashed border-border/50" />
@@ -220,24 +221,30 @@ function TicketEmitidoRender({
         <span className="text-xs uppercase tracking-wider text-muted-foreground">
           {esGuia ? 'Total Ticket Guía' : 'Total a Pagar'}
         </span>
-        <p className={`text-3xl font-bold ${esGuia ? 'text-amber-500' : ''}`}>
+        <p className={`text-2xl font-bold ${esGuia ? 'text-amber-500' : ''}`}>
           Q{parseFloat(ticket.montoTotal).toFixed(2)}
         </p>
       </div>
 
       {/* QR firmado por el servidor: se codifica tal cual viene */}
-      <div className="flex flex-col items-center pt-2">
+      <div className="flex flex-col items-center pt-1">
         {ticket.qr ? (
           <>
             <div
-              className={`bg-white p-3 rounded-lg shadow-sm border-2 ${
+              className={`bg-white p-2 rounded-lg shadow-sm border ${
                 esGuia ? 'border-amber-500/40' : 'border-border/40'
               }`}
             >
-              <CodigoQR valor={ticket.qr} size={esGuia ? 180 : 208} />
+              {/* 148 px medidos con el codificador real: el dato del QR es un
+                  JSON de ~109 bytes (numeroTicket + firma HMAC), que da una
+                  malla de 45 modulos, o sea 3.3 px por modulo. Debajo de 3 px
+                  empieza a costar leerlo con la camara de un telefono, que es
+                  como se valida el pase mostrado en pantalla; por eso el del
+                  guia ya no se dibuja mas chico que el del visitante. */}
+              <CodigoQR valor={ticket.qr} size={148} />
             </div>
             <span
-              className={`text-[11px] font-medium mt-2 text-center ${
+              className={`text-[11px] font-medium mt-1 text-center ${
                 tienePagoPendiente
                   ? 'text-amber-600 dark:text-amber-400 font-semibold'
                   : 'uppercase tracking-wider text-muted-foreground'
@@ -272,7 +279,7 @@ function VistaPrevia({
 
   return (
     <>
-      <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-2.5 flex items-center justify-between shadow-xs">
+      <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-2 flex items-center justify-between shadow-xs">
         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
           Atracción
         </span>
@@ -286,17 +293,17 @@ function VistaPrevia({
         <span className="text-xs uppercase tracking-wider text-muted-foreground">
           Titular / Grupo
         </span>
-        <p className="text-xl font-bold mt-0.5 tracking-wide text-foreground">
+        <p className="text-base font-bold mt-0.5 tracking-wide text-foreground">
           {preview?.nombreVisitante || '...'}
         </p>
       </div>
 
       {datosGuia?.asignado && (
-        <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-0.5">
+        <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-2 space-y-0">
           <span className="text-[10px] uppercase font-bold tracking-wider text-primary block">
             Guía Acompañante
           </span>
-          <p className="text-base font-extrabold text-foreground tracking-wide uppercase">
+          <p className="text-sm font-extrabold text-foreground tracking-wide uppercase">
             {datosGuia.nombre}
           </p>
           <p className="text-[11px] text-muted-foreground font-medium">
@@ -308,11 +315,11 @@ function VistaPrevia({
       <div className="flex justify-between items-start">
         <div>
           <span className="text-xs uppercase tracking-wider text-muted-foreground">Fecha</span>
-          <p className="font-semibold text-base mt-0.5">{fechaFormateada}</p>
+          <p className="font-semibold text-sm mt-0.5">{fechaFormateada}</p>
         </div>
         <div className="text-right">
           <span className="text-xs uppercase tracking-wider text-muted-foreground">Personas</span>
-          <p className="font-semibold text-base mt-0.5">
+          <p className="font-semibold text-sm mt-0.5">
             {preview?.cantidadPersonas || 0} Pax
           </p>
         </div>
@@ -328,7 +335,7 @@ function VistaPrevia({
       </div>
 
       {preview?.nombreOpcionPago && (
-        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-3 flex items-center justify-between shadow-xs">
+        <div className="rounded-lg border-2 border-border/60 bg-muted/30 p-2 flex items-center justify-between shadow-xs">
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Forma de Pago
           </span>
@@ -338,7 +345,7 @@ function VistaPrevia({
         </div>
       )}
 
-      <div className="relative py-2">
+      <div className="relative py-1">
         <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-background" />
         <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-6 h-6 rounded-full bg-background" />
         <div className="border-t border-dashed border-border/50" />
@@ -348,18 +355,18 @@ function VistaPrevia({
         <span className="text-xs uppercase tracking-wider text-muted-foreground">
           {datosGuia?.requiereTicketSeparado ? 'Subtotal Visitante' : 'Total a Pagar'}
         </span>
-        <p className="text-3xl font-bold">Q{montoVisitante.toFixed(2)}</p>
+        <p className="text-2xl font-bold">Q{montoVisitante.toFixed(2)}</p>
       </div>
 
       {/* El QR y el folio solo existen después de emitir: el servidor los firma */}
-      <div className="flex flex-col items-center pt-2">
-        <div className="bg-muted/40 border-2 border-dashed border-border/60 rounded-lg h-[208px] w-[208px] flex flex-col items-center justify-center gap-2 text-muted-foreground">
+      <div className="flex flex-col items-center pt-1">
+        <div className="bg-muted/40 border-2 border-dashed border-border/60 rounded-lg h-[148px] w-[148px] flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
           <QrCode className="h-10 w-10 opacity-40" />
           <span className="text-[11px] text-center px-4 leading-tight">
             El código QR se genera al emitir el ticket
           </span>
         </div>
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground mt-2 font-medium">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1 font-medium">
           Vista previa
         </span>
       </div>

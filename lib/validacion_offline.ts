@@ -1,5 +1,6 @@
 import { db } from '@/lib/db_tickets'
 import type { TicketBackend } from '@/tipos'
+import { formatearInstante } from '@/lib/fecha_guatemala'
 
 /**
  * Validación de pases en la puerta cuando no hay conexión.
@@ -38,21 +39,40 @@ export async function validarSinConexion(
 
   const ticket = await db.ticketsLocales.where('numeroTicket').equals(folio).first()
 
-  if (venta.fechaUsoLocal) {
+  /*
+   * El sello se busca POR FOLIO, no por venta.
+   *
+   * Una venta con guía sin carnet tiene dos pases y entran por separado. Cuando
+   * el sello era de la venta, el primero en pasar dejaba al otro figurando como
+   * usado, y en la puerta se le negaba el ingreso a alguien que había pagado.
+   */
+  const usoPrevio =
+    venta.usosLocales?.[folio] ??
+    // Filas anteriores a este cambio: `fechaUsoLocal` era de toda la venta y lo
+    // único razonable es atribuirlo al pase del visitante, que es el que se
+    // sellaba de hecho.
+    (venta.fechaUsoLocal && folio === venta.venta.numeroTicket
+      ? { fechaUso: venta.fechaUsoLocal }
+      : undefined)
+
+  if (usoPrevio) {
     return {
       estado: 'ya_usado',
-      mensaje: `Este pase ya se utilizó el ${new Date(venta.fechaUsoLocal).toLocaleString('es-GT')}.`,
+      mensaje: `Este pase ya se utilizó el ${formatearInstante(usoPrevio.fechaUso)}.`,
       ticket: ticket ?? sinDetalle(folio, venta.resumen.nombreGrupo),
     }
   }
 
-  const fechaUsoLocal = new Date().toISOString()
+  const fechaUso = new Date().toISOString()
 
-  // El sello es local y se sube junto con la venta. Marcar el uso acá es lo que
-  // evita que el mismo pase entre dos veces mientras dura el corte de red.
+  // El sello es local y se sube al reconectar. Marcarlo acá es lo que evita que
+  // el mismo pase entre dos veces mientras dura el corte de red.
   await db.transaction('rw', [db.ventasPendientes, db.ticketsLocales], async () => {
-    await db.ventasPendientes.put({ ...venta, fechaUsoLocal })
-    if (ticket) await db.ticketsLocales.put({ ...ticket, fechaUso: fechaUsoLocal })
+    await db.ventasPendientes.put({
+      ...venta,
+      usosLocales: { ...(venta.usosLocales ?? {}), [folio]: { fechaUso } },
+    })
+    if (ticket) await db.ticketsLocales.put({ ...ticket, fechaUso })
   })
 
   return {

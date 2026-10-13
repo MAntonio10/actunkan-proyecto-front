@@ -141,10 +141,21 @@ export interface RespuestaBitacora {
 
 export interface FiltrosBitacora {
   idUsuario?: number
+  /**
+   * Búsqueda parcial. Cubre `descripcion`, `accion`, `modulo`, `usuarioNombre`
+   * y el correo del ejecutor; basta que uno coincida. Se combina con los demás
+   * filtros en vez de reemplazarlos, y `total` la respeta.
+   */
+  buscar?: string
   modulo?: string
   accion?: string
   fechaInicio?: string
   fechaFin?: string
+  /**
+   * Sentido del orden por fecha; `desc` por omisión. Lo resuelve el servidor:
+   * invertir acá el arreglo recibido solo reordenaría la página visible.
+   */
+  orden?: 'asc' | 'desc'
   pagina?: number
   /** Tope del backend: 200. Un 0 o algo mayor responde 400. */
   limite?: number
@@ -998,6 +1009,47 @@ export interface GuiaBackend extends GuiaCatalogo {
   _count?: { tickets: number }
 }
 
+/**
+ * Taquilla registrada: el dispositivo que firma sus propios pases.
+ *
+ * Reemplaza al modelo de lotes pre-firmados. Antes el QR era
+ * `HMAC(folio, secreto-del-servidor)`, así que una taquilla sin red no podía
+ * firmar y había que reservarle folios por adelantado. Con un par de llaves por
+ * dispositivo la taquilla firma sola y los lotes sobran.
+ *
+ * `llavePublica` viaja en SPKI codificado en base64; la privada nunca sale del
+ * dispositivo — se genera no extraíble y vive en IndexedDB.
+ */
+export interface DispositivoTaquilla {
+  id: number
+  /** Identificador que el propio dispositivo genera y conserva. */
+  idDispositivo: string
+  nombre?: string | null
+  /** Prefijo del folio de esta taquilla: 'D01', 'D02'... */
+  serie: string
+  ultimoCorrelativo: number
+  revocado: boolean
+  /**
+   * La caja del turno contra la que esta taquilla va a cuadrar.
+   *
+   * Viene en la respuesta del alta a propósito: pedirla aparte con
+   * `GET /cajas/actual` es un segundo viaje que puede fallar justo cuando ya no
+   * hay red, y el equipo quedaría armado sin saber contra qué cuadra.
+   *
+   * `fechaCreacion` es **hora de pared**, como todo lo que viene de la API: no
+   * se le aplica conversión de zona. Ver `lib/fecha_guatemala.ts`.
+   */
+  caja?: { id: number; fechaCreacion: string } | null
+  /**
+   * Folios que la taquilla numeró y de los que nadie respondió: ni ticket
+   * subido ni descarte declarado.
+   *
+   * Es la única señal que delata un cobro desviado. Declarar es voluntario y el
+   * servidor no puede obligar, pero el silencio deja marca acá.
+   */
+  foliosSinRendir?: number
+}
+
 export interface RespuestaGuias {
   datos: GuiaBackend[]
   total: number
@@ -1096,20 +1148,23 @@ export interface RespuestaEmisionTicket {
   estadoPago?: string
 }
 
-export interface TicketConfirmadoPago {
-  numeroTicket: string
-  nombre?: string | null
-  personas?: number
-  cantidadPersonas?: number
-  atraccion?: string | CatalogoCodificado
-  monto?: number | string
-}
 
-export interface RespuestaConfirmacionPago {
+/**
+ * Lo que devuelve `GET /pagos/checkout/:idCheckout`, el endpoint público de solo
+ * lectura que consulta la página de éxito.
+ *
+ * Es deliberadamente escueto: al ser público, no expone el QR ni su firma —con eso
+ * cualquiera podría fabricarse un pase— ni el nombre del grupo, la atracción o
+ * cuántas personas son, que identifican a una persona ante quien tenga el id del
+ * checkout. Solo viaja lo que el pagador necesita ver de su propio cobro.
+ */
+export interface RespuestaEstadoCheckout {
   pagado: boolean
-  mensaje?: string
-  monto?: number | string
-  ticket?: TicketConfirmadoPago
+  estadoPago: 'PAGADO' | 'Pago pendiente' | 'CANCELADO' | string
+  monto: string
+  folio: string
+  fechaPago: string | null
+  anulado: boolean
 }
 
 export interface RespuestaPagoTicket {
@@ -1499,6 +1554,14 @@ export interface VentaOffline extends PayloadEmisionTicket {
   numeroTicketGuia?: string
   fechaEmision: string
   montoCobrado: string
+  /**
+   * Firma del folio con la llave de esta taquilla, en base64. Solo en modo
+   * dispositivo; en modo lote el servidor no la mira. Es `@IsOptional()` en el
+   * DTO, así que mandarla de más no rompe `forbidNonWhitelisted`.
+   */
+  firma?: string
+  /** Lo mismo para el segundo folio, el del guía sin carnet. */
+  firmaGuia?: string
 }
 // No agregue campos acá sin que existan en DOCUMENTACION_ENDPOINTS.md 18.3. El
 // ValidationPipe del backend usa `forbidNonWhitelisted`: un solo campo de más
@@ -1519,6 +1582,35 @@ export type CodigoRechazoVenta =
   | 'LOTE_INVALIDADO'
   | 'PAGO_NO_EFECTIVO'
   | 'CATALOGO_INVALIDO'
+  // --- Del modo por dispositivo, que reemplaza a los lotes ---
+  /** El folio no pertenece a la serie de esta taquilla. */
+  | 'FOLIO_DE_OTRA_SERIE'
+  /** La firma no corresponde a la llave pública registrada del dispositivo. */
+  | 'FIRMA_INVALIDA'
+  /**
+   * La caja de origen ya se cerró y esta venta llegó después.
+   *
+   * Es el otro rechazo que significa dinero a la vista: el cobro existe, el
+   * arqueo ya se congeló sin él, y solo un supervisor puede registrarlo como
+   * ajuste posterior. Se rechaza en vez de entrar en silencio a un arqueo
+   * cerrado, que dejaría un cierre que no cuadra y sin rastro de por qué.
+   */
+  | 'CAJA_YA_CERRADA'
+  /**
+   * El servidor falló por su cuenta: no hay nada malo en la venta.
+   *
+   * **Es el único rechazo que se reintenta**, y por eso existe aparte. Antes
+   * cualquier fallo no previsto del backend salía como `CATALOGO_INVALIDO`, que
+   * manda a revisar la atracción y el país de una venta que estaba bien — y
+   * como un rechazo del servidor no se reintenta, invitaba a **descartar dinero
+   * ya cobrado por un bug ajeno**. Pasó: un `folioReservado.update()` con
+   * `id: null` dejó toda la emisión firmada por taquilla sin poder subir, y se
+   * reportaba como catálogo inválido.
+   *
+   * El detalle del fallo va al log del servidor, no al cuerpo: adentro no hay
+   * nada que el taquillero pueda arreglar.
+   */
+  | 'ERROR_INTERNO'
 
 /** Lo cobrado en taquilla no coincide con la tarifa vigente en `fechaEmision`.
  *  La venta se registra igual; la diferencia queda visible en el arqueo. */
@@ -1558,6 +1650,68 @@ export interface RespuestaConciliacionLote {
 
 // ---- Estructuras locales (Dexie). No viajan al backend tal cual. ----
 
+/**
+ * Folio que se numeró pero nunca va a ser ticket, declarado al servidor.
+ *
+ * Un folio emitido por la taquilla tiene que terminar rendido de una de dos
+ * formas: como ticket subido, o como descarte declarado. Lo que no llega de
+ * ninguna manera queda en `foliosSinRendir` del dispositivo, que es lo que
+ * delata un cobro desviado sin que nadie tenga que sospechar primero.
+ *
+ * Por eso hay que declarar los dos casos en que un folio muere localmente: la
+ * venta anulada en taquilla y la rechazada que el operador descarta.
+ */
+export interface DescarteOffline {
+  numeroTicket: string
+  /** La firma del propio folio. Sin ella cualquier taquilla podría declarar
+   *  folios de otra y ensuciarle el cuadre. */
+  firma: string
+  montoCobrado: string
+  fechaDescarte: string
+  /**
+   * Qué clase de muerte tuvo el folio. Los dos lo liberan y cuentan como
+   * rendido; lo que cambia es la acción que queda en bitácora, para poder
+   * filtrarlas sin leer cada descripción.
+   *
+   * - `DESCARTADO`: un cobro ya hecho que se tira. Alguien tiene que explicarlo.
+   * - `ANULADO`: una venta que no llegó a existir.
+   *
+   * El servidor asume `DESCARTADO` si falta, o sea el caso grave. Es a
+   * propósito: si el valor por omisión fuera el benigno, omitir el campo sería
+   * la forma de esconder un descarte.
+   *
+   * Importa separarlos porque anular es mucho más frecuente: mezclados, una
+   * taquilla con veinte anulaciones normales se vería igual que una con veinte
+   * cobros desviados, y la cifra dejaría de señalar nada.
+   */
+  tipo?: 'DESCARTADO' | 'ANULADO'
+  motivo?: string
+}
+
+export type EstadoResultadoDescarte = 'REGISTRADO' | 'DUPLICADO_IGNORADO' | 'RECHAZADO'
+
+export interface ResultadoDescarteOffline {
+  numeroTicket: string
+  estado: EstadoResultadoDescarte
+  codigo?: 'FIRMA_INVALIDA' | 'FOLIO_YA_EMITIDO'
+  mensaje?: string
+}
+
+export interface RespuestaDescartesOffline {
+  declarados: number
+  resultados: ResultadoDescarteOffline[]
+}
+
+/** Fila local: el descarte esperando a que haya red para declararse. */
+export interface DescartePendienteLocal extends DescarteOffline {
+  /** La venta de la que salió, para poder rastrearlo. */
+  idLocal: string
+  /** 0/1, no booleano: IndexedDB no admite booleanos como clave de índice. */
+  declarado: 0 | 1
+  intentos: number
+  ultimoError?: string
+}
+
 export type EstadoVentaLocal =
   | 'pendiente'
   /** El operador decidió no subirla por ahora. Sigue siendo dinero cobrado que
@@ -1574,6 +1728,23 @@ export type EstadoVentaLocal =
 
 /** Fila de la cola de subida. Guarda además lo necesario para imprimir el pase
  *  y para mostrar el historial sin conexión, que el backend todavía no conoce. */
+/**
+ * Ingreso sellado sin conexión, por folio.
+ *
+ * Es por folio y no por venta porque una venta con guía sin carnet emite DOS
+ * pases, y cada uno entra por su cuenta: puede pasar el visitante y el guía
+ * quedarse afuera, o al revés.
+ */
+export interface UsoLocalDeFolio {
+  fechaUso: string
+  /** Ya se selló contra el servidor. */
+  sincronizado?: boolean
+  /** Intentos fallidos de sellarlo, para no reintentar para siempre. */
+  intentosSello?: number
+  /** Por qué falló el último intento, cuando el sello quedó sin poner. */
+  errorSello?: string
+}
+
 export interface VentaPendienteLocal {
   idLocal: string
   venta: VentaOffline
@@ -1581,10 +1752,34 @@ export interface VentaPendienteLocal {
   intentos: number
   ultimoError?: string
   codigoRechazo?: CodigoRechazoVenta
+  /**
+   * Ingresos sellados sin conexión, indexados por `numeroTicket`.
+   *
+   * Reemplaza a `fechaUsoLocal`, que era uno solo para toda la venta. Con dos
+   * pases eso fallaba de tres formas a la vez: al entrar el visitante, el pase
+   * del guía figuraba usado y no podía pasar; al sincronizar se sellaba siempre
+   * el del visitante aunque hubiera entrado el guía; y el que no se sellaba
+   * quedaba libre para volver a entrar.
+   */
+  usosLocales?: Record<string, UsoLocalDeFolio>
   /** Devuelta por el backend al subir: se cobró distinto de la tarifa vigente. */
   discrepancia?: DiscrepanciaMonto | null
-  idLote: number
-  /** Folios consumidos: uno, o dos si hubo guía sin carnet. */
+  /**
+   * Lote del que salieron los folios. **Vestigial: el front ya no lo escribe.**
+   *
+   * Decidía por cuál de los dos caminos subía la venta, cuando había dos. Hoy
+   * el front solo emite firmando con el dispositivo, así que ninguna venta nueva
+   * lleva este campo; sobrevive para las filas que puedan quedar en el IndexedDB
+   * de un equipo que vendió antes del cambio.
+   *
+   * El servidor sigue aceptando `idLote` **o** `dispositivo`, nunca los dos
+   * —mandar ambos da 400—, porque cada modo asigna la venta a una caja distinta
+   * y dejarlo ambiguo pondría en manos del cliente a qué arqueo entra el dinero.
+   */
+  idLote?: number
+  /** Taquilla que firmó estos folios. Solo en ventas del modelo nuevo. */
+  dispositivo?: string
+  /** Folios consumidos: uno, o dos si hubo guía sin carnet. Solo en modo lote. */
   folios: FolioReservado[]
   /** Etiquetas resueltas desde catálogos al vender, para el historial offline. */
   resumen: {
@@ -1598,19 +1793,28 @@ export interface VentaPendienteLocal {
    * el servidor no hay nada que dar de baja, así que tampoco hace falta el
    * permiso `EmisionTickets / Anular`, que un taquillero normalmente no tiene.
    *
-   * El folio consumido se declara **no utilizado** al conciliar el lote. Eso lo
-   * cierra del lado del backend, deja la numeración sin huecos sin explicar y
-   * hace que `POST /tickets/validar` responda 404: el pase impreso deja de
-   * servir para entrar. En la caja no entró ni salió dinero.
+   * El folio consumido **no se reutiliza nunca**: el visitante puede seguir con
+   * el impreso en la mano y reemitirlo le daría el mismo pase a dos personas.
+   * Por eso el correlativo tampoco retrocede.
+   *
+   * Que ese número quede quemado se declara con `POST /tickets/descartes-offline`.
+   * Sin esa declaración, un folio numerado del que nadie responde es
+   * indistinguible de un cobro desviado — es la única señal que tiene el
+   * servidor. Antes esto lo cerraba la conciliación del lote, que ya no existe.
+   *
+   * En la caja no entró ni salió dinero.
    */
   fechaAnulacion?: string
   motivoAnulacion?: string
   usuarioAnulacion?: string
   /** Sellado localmente si el pase se validó en la puerta sin conexión. */
   fechaUsoLocal?: string
-  /** El uso ya quedó registrado en el backend. Distingue el caso de un pase que
-   *  se validó después de que su venta ya había subido: ahí el sello viaja por
-   *  `POST /tickets/validar`, no dentro de la venta. */
+  /**
+   * **Muerto: cero escrituras en todo el front.** Lo reemplazó `usosLocales`,
+   * que lleva el sello por folio y no por venta — con dos pases, uno solo para
+   * toda la venta fallaba de tres formas (ver el comentario de `usosLocales`).
+   * Se conserva declarado para no romper la lectura de filas viejas.
+   */
   usoSincronizado?: boolean
   fechaCreacion: string
   fechaSincronizacion?: string

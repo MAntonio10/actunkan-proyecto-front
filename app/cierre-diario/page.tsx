@@ -26,21 +26,15 @@ import {
   Lock,
   LockOpen,
   CheckCircle,
-  TrendingUp,
   AlertCircle,
   RefreshCw,
   EyeOff,
   ClipboardCheck,
   HandHeart,
-  TrendingDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import {
-  conciliarLoteActual,
-  descartarLoteLocal,
-  ErrorVentasPendientes,
-} from '@/lib/folios_offline'
+import { recaudacionSinSubir } from '@/lib/emision_offline'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
 import { HistorialCierresCaja } from '@/componentes/historial_cierres_caja'
 import { HistorialAperturasCaja } from '@/componentes/historial_aperturas_caja'
@@ -49,6 +43,7 @@ import {
   type AperturaCajaBackend,
   type ArqueoCaja,
 } from '@/tipos'
+import { formatearFechaApi } from '@/lib/fecha_guatemala'
 
 // Los montos son Decimal(18,4) en Prisma y viajan como cadena ("500.0000")
 // para no perder precisión. Se convierten siempre antes de operar con ellos.
@@ -65,7 +60,7 @@ function formatearFechaHora(valor?: string): string {
   if (!valor) return '—'
   const fecha = new Date(valor)
   if (isNaN(fecha.getTime())) return '—'
-  return fecha.toLocaleString('es-GT', { dateStyle: 'medium', timeStyle: 'short' })
+  return formatearFechaApi(valor)
 }
 
 export default function CierreDiarioPage() {
@@ -157,35 +152,34 @@ export default function CierreDiarioPage() {
     }
     setCerrando(true)
     try {
-      // Conciliar el lote de folios es requisito para cerrar la caja
-      // (DOCUMENTACION_ENDPOINTS.md 18.4). Se intenta antes para que el
-      // taquillero no se choque con un 409 que no sabe cómo resolver.
-      try {
-        await conciliarLoteActual()
-      } catch (errorLote) {
-        // Ventas cobradas sin subir: esto sí lo frena el frontend, porque
-        // cerrar dejaría dinero en el cajón sin ticket que lo respalde.
-        if (errorLote instanceof ErrorVentasPendientes) {
-          toast.error('Hay ventas sin conexión pendientes', {
-            description: errorLote.message,
-          })
-          setCerrando(false)
-          return
-        }
-        // Cualquier otro fallo no frena el cierre. El backend concilia solo los
-        // lotes vencidos de la caja, así que un "ya conciliado" acá es normal;
-        // si el lote sigue vigente, responderá 409 y se informa abajo.
-        console.warn('Conciliación previa al cierre:', errorLote)
+      // Primera línea de defensa, y la única que no depende del modelo de
+      // folios: si hay cobros sin subir no se cierra, punto. Va antes de
+      // conciliar nada, porque ya no hay lotes. Es la única defensa que queda:
+      // al desaparecer los lotes el servidor perdió la señal de que un
+      // dispositivo puede deberle ventas, así que solo lo sabe el equipo.
+      const sinSubir = await recaudacionSinSubir()
+      if (sinSubir > 0) {
+        toast.error('Hay recaudación sin conexión pendiente', {
+          description: `Quedan ${sinSubir} sin subir. Súbalas desde Sincronización antes de cerrar la caja: el dinero está cobrado y todavía fuera del sistema.`,
+        })
+        setCerrando(false)
+        return
       }
+
+      /*
+       * Ya no hay lote que conciliar: la taquilla numera y firma sus propios
+       * folios, así que no queda inventario abierto contra la caja.
+       *
+       * La comprobación de recaudación sin subir, que antes vivía dentro de la
+       * conciliación, quedó arriba y es ahora la única defensa del lado del
+       * cliente. No la mueva de ahí: si vuelve a depender de que exista un lote,
+       * deja de correr sin que nadie lo note.
+       */
 
       const res = await api.cajas.cerrar(cajaActual.id, {
         montoContado: monto,
         observaciones: observacionesCierre || undefined,
       })
-
-      // Con la caja cerrada, el lote de esa caja ya no sirve: o se concilió
-      // explícitamente arriba, o lo concilió el backend por vencimiento.
-      await descartarLoteLocal()
       const diferencia = aNumero(res.cierre?.diferencia)
       const detalleDif =
         diferencia === 0
@@ -199,15 +193,55 @@ export default function CierreDiarioPage() {
       await cargarTodo()
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : 'No se pudo cerrar la caja'
-      // 409: la caja tiene un lote de folios todavía vigente, así que puede
-      // haber otro dispositivo vendiendo contra ella. El vencido lo concilia el
-      // backend solo; este no, y con razón.
+      // 409 con lote vigente: otro dispositivo puede seguir vendiendo contra
+      // esta caja. El vencido lo concilia el backend solo; este no, y con razón.
+      //
+      // Se reconoce por `codigo` y no por el 401/409 pelado: `cerrar` puede
+      // responder 409 por otras razones, y clasificar por estado HTTP mostraría
+      // el texto del lote sobre un conflicto que no tiene nada que ver.
+      //
+      // El identificador de la taquilla es la parte que faltaba. Quien cierra la
+      // caja suele estar en otra máquina, así que "sincronice el dispositivo"
+      // era incumplible no solo con la tablet perdida, sino en el caso corriente
+      // de no saber cuál de las taquillas es.
       if (err instanceof ApiError && err.status === 409) {
-        toast.error('Hay un lote de folios offline vigente', {
-          description:
-            'Otro dispositivo puede seguir vendiendo contra esta caja. Sincronice y concilie sus folios antes de cerrar.',
-        })
-        return
+        const cuerpo = (err.cuerpo ?? {}) as {
+          codigo?: unknown
+          idDispositivo?: unknown
+          serie?: unknown
+          nombre?: unknown
+          foliosReservados?: unknown
+        }
+
+        if (cuerpo.codigo === 'LOTE_OFFLINE_PENDIENTE' || cuerpo.idDispositivo) {
+          // Se prefiere lo que un humano puede leer en el equipo: la serie que
+          // le pinta el backend ('D01') o el nombre que le pusieron. El
+          // identificador crudo es el respaldo, porque es un UUID y no le dice
+          // nada a nadie parado frente a tres tablets iguales.
+          const taquilla =
+            (typeof cuerpo.nombre === 'string' && cuerpo.nombre) ||
+            (typeof cuerpo.serie === 'string' && cuerpo.serie) ||
+            (typeof cuerpo.idDispositivo === 'string' && cuerpo.idDispositivo) ||
+            null
+          const folios =
+            typeof cuerpo.foliosReservados === 'number' ? cuerpo.foliosReservados : null
+
+          const detalle = [
+            taquilla ? `Taquilla: ${taquilla}` : null,
+            folios !== null ? `${folios} folios sin conciliar` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+
+          toast.error('Hay un lote de folios offline vigente', {
+            // El texto del servidor ya nombra los dos casos — equipo a mano y
+            // equipo perdido —, así que se muestra tal cual en vez de mantener
+            // una copia acá que se desincronice de la suya.
+            description: [mensaje, detalle].filter(Boolean).join(' · '),
+            duration: 12_000,
+          })
+          return
+        }
       }
       toast.error('Error al cerrar la caja', { description: mensaje })
     } finally {
@@ -238,10 +272,16 @@ export default function CierreDiarioPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Refresca el estado de la caja Y las tablas de abajo. Antes
+                  solo lo primero, y cada tabla traía su propio "Actualizar";
+                  al quitarlos por duplicados este botón tuvo que cubrirlos. */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={cargarTodo}
+                onClick={() => {
+                  setRefrescarCierres((n) => n + 1)
+                  cargarTodo()
+                }}
                 disabled={cargando}
                 className="gap-2 cursor-pointer"
               >
@@ -382,10 +422,15 @@ export default function CierreDiarioPage() {
                   <div
                     className={cn(
                       'grid gap-4',
-                      puedeSupervisar ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1',
+                      puedeSupervisar ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-1',
                     )}
                   >
-                    <Card className="bg-card border-border/50">
+                    <Card
+                      className={cn(
+                        'bg-card border-border/50',
+                        puedeSupervisar && 'col-span-2 sm:col-span-1',
+                      )}
+                    >
                       <CardContent className="pt-6">
                         <div className="flex items-start justify-between">
                           <div>
@@ -401,20 +446,6 @@ export default function CierreDiarioPage() {
 
                     {puedeSupervisar && (
                       <>
-                        <Card className="bg-emerald-500/10 border-emerald-500/30">
-                          <CardContent className="pt-6">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <p className="text-sm text-muted-foreground">Ventas en Efectivo</p>
-                                <p className="text-2xl font-bold text-emerald-600">
-                                  {moneda(arqueo?.ventasEfectivo)}
-                                </p>
-                              </div>
-                              <TrendingUp className="h-7 w-7 text-emerald-500/60" />
-                            </div>
-                          </CardContent>
-                        </Card>
-
                         {/* Las donaciones son efectivo del mismo cajón: suman
                             al arqueo, si no saldrían como sobrante al cerrar. */}
                         {arqueo?.totalDonaciones !== undefined && (
@@ -428,22 +459,6 @@ export default function CierreDiarioPage() {
                                   </p>
                                 </div>
                                 <HandHeart className="h-7 w-7 text-blue-500/60" />
-                              </div>
-                            </CardContent>
-                          </Card>
-                        )}
-
-                        {arqueo?.totalGastos !== undefined && (
-                          <Card className="bg-destructive/10 border-destructive/30">
-                            <CardContent className="pt-6">
-                              <div className="flex items-start justify-between">
-                                <div>
-                                  <p className="text-sm text-muted-foreground">Gastos</p>
-                                  <p className="text-2xl font-bold text-destructive">
-                                    −{moneda(arqueo.totalGastos)}
-                                  </p>
-                                </div>
-                                <TrendingDown className="h-7 w-7 text-destructive/60" />
                               </div>
                             </CardContent>
                           </Card>
@@ -466,39 +481,6 @@ export default function CierreDiarioPage() {
                     )}
                   </div>
 
-                  {puedeSupervisar && (
-                    <Card className="bg-card border-border/50">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base">Cómo se calcula el arqueo</CardTitle>
-                        <CardDescription>
-                          El servidor calcula el monto esperado; al cerrar se compara contra lo
-                          contado físicamente.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        {/* La fórmula se arma con los términos que el servidor
-                            devuelve, para que no quede desfasada si el arqueo
-                            cambia de componentes. */}
-                        <p className="text-sm text-muted-foreground font-mono bg-muted/40 rounded-lg p-3">
-                          {moneda(arqueo?.montoInicial)} (fondo) + {moneda(arqueo?.ventasEfectivo)}{' '}
-                          (ventas efectivo)
-                          {arqueo?.totalDonaciones !== undefined && (
-                            <> + {moneda(arqueo.totalDonaciones)} (donaciones)</>
-                          )}
-                          {arqueo?.totalGastos !== undefined && (
-                            <> − {moneda(arqueo.totalGastos)} (gastos)</>
-                          )}{' '}
-                          ={' '}
-                          <span className="text-foreground font-bold">
-                            {moneda(arqueo?.montoEsperado)}
-                          </span>
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-2">
-                          Las ventas con tarjeta no entran al arqueo de efectivo de caja.
-                        </p>
-                      </CardContent>
-                    </Card>
-                  )}
                 </div>
               )}
 
@@ -536,6 +518,7 @@ export default function CierreDiarioPage() {
                 <Input
                   id="monto-inicial"
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   step="0.01"
                   placeholder="0.00"
@@ -605,6 +588,7 @@ export default function CierreDiarioPage() {
                 <Input
                   id="monto-contado"
                   type="number"
+                  inputMode="decimal"
                   min={0}
                   step="0.01"
                   placeholder="0.00"

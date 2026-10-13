@@ -129,6 +129,34 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * Caja que se desplaza sin mostrar la barra.
+ *
+ * Es solo estetica: el contenido se sigue desplazando con la rueda, el dedo,
+ * las flechas y AvPag, y el foco del teclado lo arrastra igual. Lo que se pierde
+ * es el aviso visual de que hay mas contenido, asi que se usa donde ya se ve que
+ * la lista sigue -- un formulario largo -- y no para esconder algo que el
+ * usuario no sabria que esta ahi.
+ *
+ * Va con `@utility` y no dentro de `@layer components`: asi Tailwind la emite en
+ * la capa de utilidades, que es la ultima, y ninguna regla de las capas de
+ * arriba puede volver a mostrar la barra.
+ *
+ * Hacen falta las tres declaraciones: `scrollbar-width` la entienden Firefox y
+ * los Chromium nuevos, el pseudo-elemento `::-webkit-scrollbar` cubre Safari y
+ * los Chromium viejos, y `-ms-overflow-style` el Edge heredado.
+ */
+@utility scroll-sin-barra {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -344,5 +372,191 @@
     opacity: 1;
     filter: none;
     transform: none;
+  }
+}
+
+/*
+ * El pase impreso.
+ *
+ * En pantalla no existe; solo aparece al imprimir. El PDF equivalente lo genera
+ * el servidor, pero sin conexión no hay forma de pedirlo, y una venta offline
+ * dejaba al visitante sin comprobante aunque su QR ya fuera válido.
+ *
+ * `size: 80mm auto` y no una hoja: el pase va a una impresora térmica de
+ * tickets, igual que el del servidor (226,8 pt de ancho). Con A4 saldría un
+ * pase diminuto en una esquina.
+ */
+.pase-imprimible {
+  display: none;
+}
+
+@media print {
+  /*
+   * Se oculta todo y se vuelve a mostrar solo el pase. Con `visibility` y no con
+   * `display` porque el árbol está anidado: apagar los ancestros por display se
+   * llevaría también al pase.
+   */
+  body * {
+    visibility: hidden;
+  }
+  .pase-imprimible,
+  .pase-imprimible * {
+    visibility: visible;
+  }
+
+  /* El fondo del sistema es una capa fija que `visibility` no alcanza, y en
+     papel solo sería una mancha. */
+  body::before {
+    display: none !important;
+  }
+
+  /*
+   * La emisión vive dentro de contenedores de alto fijo con `overflow: hidden`
+   * —así es como se logra que solo haga scroll la columna del formulario—. En
+   * papel eso recortaría el pase por la mitad, así que se neutraliza: al
+   * imprimir no hay ventana que llenar ni columna que desplazar.
+   */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .pase-imprimible {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 72mm;
+    color: #000;
+    font-size: 9pt;
+    line-height: 1.35;
+  }
+
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
+  /* Un pase por página: con guía sin carnet son dos comprobantes para dos
+     personas distintas. El último no fuerza salto, o saldría una hoja en blanco. */
+  .pase-hoja {
+    break-after: page;
+    page-break-after: always;
+  }
+  .pase-hoja:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  /* Nada se parte a la mitad entre dos tiras de papel. */
+  .pase-bloque,
+  .pase-total,
+  .pase-qr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .pase-cabecera {
+    text-align: center;
+    border-bottom: 1px dashed #000;
+    padding-bottom: 2mm;
+    margin-bottom: 2mm;
+  }
+  .pase-logos {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 3mm;
+  }
+  /* 30 pt de alto, la misma medida que usa el pase del servidor. */
+  .pase-logos img {
+    height: 30pt;
+    width: auto;
+  }
+  .pase-cabecera h1 {
+    font-size: 13pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin: 1mm 0 0;
+  }
+  .pase-cabecera h2 {
+    font-size: 9pt;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    margin: 0;
+  }
+
+  /*
+   * Los estados van en caja con borde y no en color: una térmica es monocroma y
+   * un fondo relleno sale como mancha gris que se come el texto.
+   */
+  .pase-estado {
+    border: 1.5pt solid #000;
+    text-align: center;
+    font-weight: 700;
+    font-size: 9pt;
+    letter-spacing: 0.08em;
+    padding: 1mm;
+    margin: 0 0 2mm;
+  }
+
+  .pase-bloque {
+    margin-bottom: 2mm;
+  }
+  .pase-rotulo {
+    display: block;
+    font-size: 7.5pt;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5mm;
+  }
+  .pase-titular {
+    font-size: 12pt;
+    font-weight: 700;
+    margin: 0;
+  }
+  .pase-fila {
+    display: flex;
+    justify-content: space-between;
+    gap: 3mm;
+  }
+  .pase-fila strong {
+    text-align: right;
+  }
+  /* El folio se teclea a mano cuando el lector falla: monoespaciada para no
+     confundir caracteres parecidos. */
+  .pase-folio {
+    font-family: ui-monospace, 'Courier New', monospace;
+    font-weight: 700;
+  }
+
+  .pase-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-top: 1px dashed #000;
+    border-bottom: 1px dashed #000;
+    padding: 1.5mm 0;
+    margin: 2mm 0 1mm;
+    font-weight: 700;
+  }
+  .pase-total strong {
+    font-size: 13pt;
+  }
+  .pase-pago {
+    margin: 0 0 2mm;
+    font-size: 8pt;
+  }
+
+  .pase-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5mm;
+    margin-top: 1mm;
+  }
+  .pase-qr span {
+    font-size: 7.5pt;
+    letter-spacing: 0.08em;
+    text-align: center;
   }
 }

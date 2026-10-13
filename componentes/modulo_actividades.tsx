@@ -11,8 +11,6 @@ import {
   MapPin,
   User,
   CalendarClock,
-  ChevronLeft,
-  ChevronRight,
   MoreVertical,
   AlertTriangle,
   ListTree,
@@ -56,6 +54,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { Paginador } from "@/componentes/paginador";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import {
   Select,
@@ -73,30 +72,33 @@ import {
   type SectorParqueBackend,
   type UsuarioBackend,
 } from "@/tipos";
+import { formatearInstante, instanteParaInput, inputDelParqueAInstante } from "@/lib/fecha_guatemala";
 
 const LIMITE = 20;
 const MAX_BYTES = 2 * 1024 * 1024;
-const FORMATOS = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+/** Solo JPG y PNG. El backend valida lo mismo en `MIMES_PERMITIDOS`, así que
+ *  saltarse el `accept` del input no sirve: la subida se rechaza igual. */
+const FORMATOS = ["image/jpeg", "image/png"];
 
+/**
+ * `fechaInicio` y `fechaFin` son la excepción del sistema: el backend las guarda
+ * como **instante real**, no como hora de pared, porque las escribe el usuario y
+ * las compara contra la hora real (`actividades.service.ts`). Por eso acá va
+ * `formatearInstante` y no `formatearFechaApi`, al revés que en los demás
+ * módulos.
+ */
 function formatearFecha(valor?: string | null): string {
-  if (!valor) return "—";
-  const fecha = new Date(valor);
-  if (isNaN(fecha.getTime())) return "—";
-  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+  return formatearInstante(valor);
 }
 
-/** Convierte ISO a valor de <input type="datetime-local"> en hora local. */
+/** Instante real a valor de <input type="datetime-local">, en hora del parque. */
 function aInputLocal(iso?: string | null): string {
-  if (!iso) return "";
-  const f = new Date(iso);
-  if (isNaN(f.getTime())) return "";
-  const desfase = f.getTimezoneOffset() * 60000;
-  return new Date(f.getTime() - desfase).toISOString().slice(0, 16);
+  return instanteParaInput(iso);
 }
 
-/** El backend compara contra su hora real: se envía ISO con zona. */
+/** El backend compara contra su hora real: se envía el instante, no la pared. */
 function aISO(valorLocal: string): string {
-  return new Date(valorLocal).toISOString();
+  return inputDelParqueAInstante(valorLocal);
 }
 
 /** Estado de la publicación según los campos que calcula el servidor. */
@@ -413,7 +415,7 @@ export function ModuloActividades() {
     // usuario ve el motivo concreto sin esperar el viaje.
     if (!FORMATOS.includes(archivo.type)) {
       toast.error("Formato no permitido", {
-        description: "Solo JPEG, PNG, WebP o GIF.",
+        description: "Solo JPG o PNG.",
       });
       return;
     }
@@ -527,7 +529,7 @@ export function ModuloActividades() {
                 }}
               />
               <Label htmlFor="solo-mias" className="text-xs cursor-pointer whitespace-nowrap">
-                Solo mías
+                Propias
               </Label>
             </div>
 
@@ -544,7 +546,7 @@ export function ModuloActividades() {
                 htmlFor="incluir-expiradas"
                 className="text-xs cursor-pointer whitespace-nowrap"
               >
-                Incluir expiradas
+                Expiradas
               </Label>
             </div>
 
@@ -558,7 +560,7 @@ export function ModuloActividades() {
                 }}
               />
               <Label htmlFor="solo-anuladas" className="text-xs cursor-pointer whitespace-nowrap">
-                Solo anuladas
+                Anuladas
               </Label>
             </div>
 
@@ -739,35 +741,14 @@ export function ModuloActividades() {
             </div>
           )}
 
-          {total > LIMITE && (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-xs text-muted-foreground">
-                Página {pagina} de {totalPaginas} · {total} publicaciones
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                  disabled={pagina <= 1}
-                  className="gap-1 cursor-pointer"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                  disabled={pagina >= totalPaginas}
-                  className="gap-1 cursor-pointer"
-                >
-                  Siguiente
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
+          <Paginador
+            pagina={pagina}
+            totalPaginas={totalPaginas}
+            total={total}
+            etiqueta="publicaciones"
+            cargando={cargando}
+            onCambiar={setPagina}
+          />
         </CardContent>
       </Card>
       )}
@@ -913,7 +894,7 @@ export function ModuloActividades() {
                     const elegidos = Array.from(e.target.files || []);
                     const validos = elegidos.filter((f) => {
                       if (!FORMATOS.includes(f.type)) {
-                        toast.error(`${f.name}: formato no permitido`);
+                        toast.error(`${f.name}: solo JPG o PNG`);
                         return false;
                       }
                       if (f.size > MAX_BYTES) {
@@ -931,7 +912,7 @@ export function ModuloActividades() {
                     ? `${archivosPendientes.length} imagen${
                         archivosPendientes.length === 1 ? "" : "es"
                       } se subirán al publicar.`
-                    : "JPEG, PNG, WebP o GIF, hasta 2 MB cada una."}
+                    : "JPG o PNG, hasta 2 MB cada una."}
                 </p>
               </div>
             )}
@@ -971,7 +952,7 @@ export function ModuloActividades() {
           <DialogHeader>
             <DialogTitle className="text-base">Imágenes de la publicación</DialogTitle>
             <DialogDescription>
-              JPEG, PNG, WebP o GIF, hasta 2 MB. Eliminar una imagen la borra definitivamente.
+              JPG o PNG, hasta 2 MB. Eliminar una imagen la borra definitivamente.
             </DialogDescription>
           </DialogHeader>
 

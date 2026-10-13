@@ -79,7 +79,16 @@ export function BarraNavegacionSuperior() {
               </span>
             </motion.div>
             <div className="flex items-center gap-1.5 leading-none">
-              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground hidden sm:inline">
+              {/* Crece solo desde lg, y la interletra se cierra a medida que
+                  crece: 0.2em sostiene unas versalitas de 10 px, pero a 15 px
+                  separa tanto las letras que el nombre deja de leerse como una
+                  unidad.
+                  
+                  Deliberadamente NO crece en md: a 768 px el nombre ya mide
+                  unos 290 px y la barra tiene que repartir el ancho con el
+                  medallón, el menú de módulos y los tres indicadores de la
+                  derecha. Agrandarlo ahí lo empujaría todo. */}
+              <span className="hidden text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground sm:inline lg:whitespace-nowrap lg:text-sm lg:tracking-[0.1em] xl:text-[15px]">
                 Parque Regional Municipal ACTÚN KAN
               </span>
             </div>

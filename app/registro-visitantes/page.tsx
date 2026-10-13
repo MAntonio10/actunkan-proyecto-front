@@ -9,6 +9,7 @@ import {
 } from '@/componentes/formulario_visitante_completo'
 import { HistorialTicketsEmitidos } from '@/componentes/historial_tickets_emitidos'
 import { PaseAcceso } from '@/componentes/pase_acceso'
+import { PaseImprimible } from '@/componentes/pase_imprimible'
 import { PanelCheckoutTarjeta } from '@/componentes/panel_checkout_tarjeta'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -19,7 +20,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Ticket, History, QrCode, RotateCcw, FileText, CreditCard, RefreshCw } from 'lucide-react'
+import {
+  Ticket,
+  History,
+  QrCode,
+  RotateCcw,
+  FileText,
+  Printer,
+  CreditCard,
+  RefreshCw,
+} from 'lucide-react'
 import { Spinner } from '@/components/ui/spinner'
 import { usePdfTicket } from '@/hooks/use_pdf_ticket'
 import { cn } from '@/lib/utils'
@@ -115,11 +125,19 @@ export default function RegistroVisitantesPage() {
 
   return (
     <RutaProtegida moduloRequerido="EmisionTickets">
-      <div className="min-h-screen flex flex-col">
+      {/* De `md` para arriba la página ocupa el alto exacto de la ventana y no
+          se desplaza: lo hace la zona de contenido. Así el título y las pestañas
+          de Emisión/Historial quedan siempre a la vista, en vez de irse hacia
+          arriba mientras el taquillero llena el formulario.
+          Desde `md` y no desde `lg` porque abajo de 1024 px las dos columnas se
+          apilan pero la página sigue siendo igual de larga, y ahí reaparecía la
+          barra de la ventana. En teléfono (bajo `md`) no aplica: ahí desplazar
+          la página entera es lo correcto. */}
+      <div className="min-h-screen flex flex-col md:h-screen md:min-h-0 md:overflow-hidden">
         <BarraNavegacionSuperior />
 
-        <main className="flex-1 container mx-auto px-4 py-6 md:py-8">
-          <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <main className="flex-1 container mx-auto px-4 py-6 md:py-8 md:flex md:flex-col md:min-h-0">
+          <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 md:shrink-0">
             <div className="titulo-seccion">
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
                 Módulo de Visitantes
@@ -172,11 +190,17 @@ export default function RegistroVisitantesPage() {
               historial a media venta, y volvía a pedir los catálogos. */}
           <div
             className={cn(
+              // Entre `md` y `lg` las dos columnas van apiladas: el
+              // desplazamiento va acá, en una sola caja. Desde `lg` se reparte
+              // en cada columna y esta vuelve a `visible`.
               'grid grid-cols-1 lg:grid-cols-5 gap-6',
+              'md:flex-1 md:min-h-0 md:overflow-y-auto lg:overflow-visible scroll-sin-barra',
               pestanaActiva !== 'emision' && 'hidden',
             )}
           >
-              <div className="lg:col-span-3">
+              {/* `min-h-0` es lo que permite que la columna se desplace: sin él
+                  un hijo de rejilla crece con su contenido y empuja la página. */}
+              <div className="lg:col-span-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scroll-sin-barra">
                 <FormularioVisitanteCompleto
                   onDatosChange={handleDatosChange}
                   onTicketEmitido={handleTicketEmitido}
@@ -184,8 +208,8 @@ export default function RegistroVisitantesPage() {
                 />
               </div>
 
-              <div className="lg:col-span-2">
-                <div className="lg:sticky lg:top-24 space-y-3">
+              <div className="lg:col-span-2 lg:min-h-0 lg:overflow-y-auto scroll-sin-barra">
+                <div className="space-y-3">
                   {/* Panel de Enlace de Pago si se emitió con tarjeta */}
                   {(() => {
                     const urlCheckout =
@@ -214,21 +238,46 @@ export default function RegistroVisitantesPage() {
                     fecha={new Date()}
                   />
 
+                  {/* Invisible en pantalla; es lo único que se ve al imprimir.
+                      Ver el bloque `@media print` en app/globals.css. */}
+                  <PaseImprimible ticketsEmitidos={ticketsEmitidos} fecha={new Date()} />
+
                   {ticketsEmitidos.length > 0 && (
                     <div className="space-y-2">
-                      {/* El PDF lo arma el backend: sin conexión no está
-                          disponible. El pase en pantalla ya lleva el QR válido,
-                          así que el visitante puede pasar igual. */}
+                      {/*
+                        Imprimir va primero y siempre, con red o sin ella: es lo
+                        único que funciona en los dos casos, y en una taquilla lo
+                        que hace falta es el papel en la mano.
+
+                        El rótulo dice que el pase ya sirve. «Imprimir» a secas,
+                        en un turno sin señal, deja al taquillero dudando de si
+                        el visitante puede pasar o hay que esperar a que suba.
+                      */}
+                      <Button
+                        onClick={() => window.print()}
+                        className="w-full gap-2 cursor-pointer"
+                      >
+                        <Printer className="h-4 w-4" />
+                        {ticketsEmitidos.length > 1
+                          ? 'Imprimir los pases — ya son válidos'
+                          : 'Imprimir el pase — ya es válido'}
+                      </Button>
+
+                      {/* El PDF lo arma el backend, así que sin conexión no
+                          está. No es un problema: el pase impreso de arriba
+                          lleva el mismo QR y sirve igual. */}
                       {ticketsEmitidos.some((t) => t.origenOffline) ? (
-                        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
-                          Emitido sin conexión: el PDF se podrá imprimir desde el historial cuando
-                          la venta suba. El código QR en pantalla ya es válido para el ingreso.
+                        <p className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs text-sky-900 dark:text-sky-200">
+                          Emitido sin conexión. El PDF se podrá descargar desde el historial cuando
+                          la recaudación suba, pero no hace falta esperarlo: el pase impreso y su
+                          código QR ya son válidos para el ingreso.
                         </p>
                       ) : (
                         /* Un PDF por ticket: con guía sin carnet se emiten dos */
                         ticketsEmitidos.map((t) => (
                           <Button
                             key={t.id}
+                            variant="outline"
                             onClick={() => abrirPdf(t)}
                             disabled={pdfEnCursoId === t.id}
                             className="w-full gap-2 cursor-pointer"
@@ -356,7 +405,12 @@ export default function RegistroVisitantesPage() {
           </Dialog>
 
           {historialMontado && (
-            <div className={cn(pestanaActiva !== 'historial' && 'hidden')}>
+            <div
+              className={cn(
+                'md:flex-1 md:min-h-0 md:overflow-y-auto scroll-sin-barra',
+                pestanaActiva !== 'historial' && 'hidden',
+              )}
+            >
               <HistorialTicketsEmitidos
                 catalogos={catalogos}
                 refrescarToken={refrescarHistorial}

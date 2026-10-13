@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner'
 
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
+import { BotonRegresar } from '@/componentes/boton_regresar'
 import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,15 +33,13 @@ import {
 import { api } from '@/lib/api'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
 import { type SesionBackend } from '@/tipos'
+import { formatearFechaApi } from '@/lib/fecha_guatemala'
 
 function formatearFecha(valor?: string): string {
   if (!valor) return '—'
   const fecha = new Date(valor)
   if (isNaN(fecha.getTime())) return '—'
-  return fecha.toLocaleString('es-GT', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
+  return formatearFechaApi(valor)
 }
 
 export default function SesionesPage() {
@@ -110,16 +109,19 @@ export default function SesionesPage() {
               </p>
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={cargarSesiones}
-              disabled={cargando}
-              className="gap-2 cursor-pointer"
-            >
-              <RefreshCw className={`h-4 w-4 ${cargando ? 'animate-spin' : ''}`} />
-              Actualizar
-            </Button>
+            <div className="flex items-center gap-2">
+              <BotonRegresar />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={cargarSesiones}
+                disabled={cargando}
+                className="h-11 gap-2 cursor-pointer sm:h-9"
+              >
+                <RefreshCw className={`h-4 w-4 ${cargando ? 'animate-spin' : ''}`} />
+                Actualizar
+              </Button>
+            </div>
           </div>
 
           <Card className="bg-card border-border/50">

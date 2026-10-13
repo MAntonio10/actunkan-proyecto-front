@@ -1,6 +1,12 @@
 import { api } from '@/lib/api'
 import { db } from '@/lib/db_tickets'
-import { consumirFolios, devolverFolios } from '@/lib/folios_offline'
+import type { ContextoOffline } from '@/lib/db_tickets'
+import {
+  identidadActual,
+  reservarFoliosLocales,
+  firmarFolio,
+  armarQrFirmadoLocalmente,
+} from '@/lib/dispositivo_taquilla'
 import { refrescarEstado, sincronizar } from '@/lib/sincronizador_tickets'
 import type {
   CatalogosTickets,
@@ -13,6 +19,7 @@ import type {
   TicketLocalNoSincronizado,
   VentaOffline,
   VentaPendienteLocal,
+  DescartePendienteLocal,
 } from '@/tipos'
 
 /**
@@ -145,22 +152,27 @@ export async function emitirSinConexion(
     )
   }
 
-  const lote = await db.lote.get('actual')
-  if (!lote) {
+  const cantidadFolios = datos.requiereTicketGuia ? 2 : 1
+
+  /*
+   * La taquilla numera y firma sus propios folios. No hay inventario que se
+   * agote ni lote que reservar: mientras esté registrada puede vender sin red
+   * indefinidamente.
+   *
+   * Si no está registrada no hay forma de emitir sin conexión, y se dice así en
+   * vez de fallar de manera oscura: lo que falta es una conexión, una sola vez.
+   */
+  const identidad = await identidadActual()
+  if (!identidad?.serie || identidad.revocado) {
     throw new ErrorEmisionOffline(
       'SIN_FOLIOS',
-      'No hay folios reservados en este dispositivo. Conéctese a internet para obtenerlos.',
+      identidad?.revocado
+        ? 'Esta taquilla fue dada de baja y no puede emitir pases. Avise a un supervisor.'
+        : 'Esta taquilla todavía no está registrada. Conéctese a internet una vez para darla de alta y poder vender sin conexión.',
     )
   }
 
-  const cantidadFolios = datos.requiereTicketGuia ? 2 : 1
-  const folios = await consumirFolios(cantidadFolios)
-  if (!folios) {
-    throw new ErrorEmisionOffline(
-      'SIN_FOLIOS',
-      `No quedan folios suficientes (se necesitan ${cantidadFolios}). Conéctese a internet para reponerlos.`,
-    )
-  }
+  const folios: FolioReservado[] = await foliosFirmadosPorLaTaquilla(cantidadFolios)
 
   const fechaEmision = new Date().toISOString()
   const idLocal = crypto.randomUUID()
@@ -181,6 +193,9 @@ export async function emitirSinConexion(
       numeroTicketGuia: datos.requiereTicketGuia ? folios[1]?.numeroTicket : undefined,
       fechaEmision,
       montoCobrado: comoDecimal(montoTotalGeneral),
+      // En modo lote van vacías y el servidor no las mira.
+      firma: folios[0].firma,
+      firmaGuia: datos.requiereTicketGuia ? folios[1]?.firma : undefined,
     }
     // `fechaUsoOffline` no se incluye: no forma parte del contrato publicado
     // (DOCUMENTACION_ENDPOINTS.md 18.3). El ingreso validado sin conexión se
@@ -191,7 +206,7 @@ export async function emitirSinConexion(
       venta,
       estado: 'pendiente',
       intentos: 0,
-      idLote: lote.idLote,
+      dispositivo: identidad.idDispositivo,
       folios,
       resumen: {
         nombreGrupo: payload.nombreGrupo,
@@ -221,10 +236,24 @@ export async function emitirSinConexion(
       tickets,
     }
   } catch (error) {
-    await devolverFolios(folios.map((f) => f.numeroTicket))
+    // No hay folios que devolver: los numera la taquilla y el correlativo ya
+    // avanzó. Retroceder haría que el siguiente repita un número ya impreso.
     throw error
   }
 }
+
+/** La taquilla numera y firma. No se puede quedar sin folios. */
+async function foliosFirmadosPorLaTaquilla(cantidad: number): Promise<FolioReservado[]> {
+  const numeros = await reservarFoliosLocales(cantidad)
+  return Promise.all(
+    numeros.map(async (numeroTicket) => ({
+      numeroTicket,
+      firma: await firmarFolio(numeroTicket),
+      qr: await armarQrFirmadoLocalmente(numeroTicket),
+    })),
+  )
+}
+
 
 /**
  * Tickets que existen solo en este dispositivo: los de ventas que aún no
@@ -237,6 +266,74 @@ export async function emitirSinConexion(
  * Las rechazadas también aparecen, y son las que más importan: ya se cobraron y
  * el servidor no las aceptó, así que alguien tiene que resolverlas a mano.
  */
+/**
+ * Cuántas recaudaciones hay cobradas y sin subir. Cero significa que se puede
+ * cerrar la caja sin dejar dinero fuera del sistema.
+ *
+ * Vive suelta a propósito. Antes la comprobación estaba dentro de la
+ * conciliación del lote de folios, que arrancaba con `if (!lote) return`: al
+ * desaparecer los lotes esa función habría vuelto en la primera línea y la
+ * guarda habría dejado de correr **sin que nadie borrara una sola línea de
+ * código**. El cierre de caja habría pasado a aceptarse con cobros sin subir,
+ * en silencio, justo cuando el servidor también perdía su señal.
+ *
+ * No la vuelva a atar a ninguna condición previa: es la única defensa que
+ * queda del lado del cliente.
+ *
+ * Las retenidas cuentan: el operador eligió no subirlas, pero el dinero está
+ * cobrado igual y sigue fuera del sistema. Las anuladas no, porque ahí no hay
+ * nada que liquidar — no entró ni salió dinero.
+ */
+/**
+ * Guarda contra qué caja está vendiendo esta taquilla.
+ *
+ * El servidor ya no lo sabe por su cuenta: se lo dice el dispositivo al subir la
+ * cola, y si esto no quedó guardado no hay venta sin conexión posible.
+ *
+ * **No sale a la red.** El id de la caja llega en la respuesta del alta del
+ * dispositivo (`POST /dispositivos`), que es el único momento con red
+ * garantizada. Antes acá se pedía `GET /cajas/actual` aparte: ese segundo viaje
+ * podía fallar justo cuando la red se estaba cayendo y dejaba el equipo armado
+ * sin saber contra qué cuadra.
+ */
+export async function guardarContextoDeCaja(
+  idAperturaCaja: number,
+  idUsuario: number,
+): Promise<void> {
+  try {
+    await db.contextoOffline.put({
+      clave: 'actual',
+      idAperturaCaja,
+      idUsuario,
+      fechaCache: new Date().toISOString(),
+    })
+  } catch {
+    // Si IndexedDB falla queda lo guardado de la última vez, que es justamente
+    // para lo que se guardó.
+  }
+}
+
+/** La caja cacheada, o null si esta taquilla nunca se conectó con una abierta. */
+export async function contextoOfflineActual(): Promise<ContextoOffline | null> {
+  try {
+    return (await db.contextoOffline.get('actual')) ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function recaudacionSinSubir(): Promise<number> {
+  try {
+    return await db.ventasPendientes
+      .where('estado')
+      .anyOf('pendiente', 'retenida', 'enviando')
+      .count()
+  } catch {
+    // Sin IndexedDB no hay ventas locales que puedan quedar sin subir.
+    return 0
+  }
+}
+
 export async function ticketsPendientesDeSubir(): Promise<TicketLocalNoSincronizado[]> {
   const ventas = await db.ventasPendientes
     .where('estado')
@@ -287,30 +384,90 @@ export async function ticketsPendientesDeSubir(): Promise<TicketLocalNoSincroniz
  *
  * La fila se conserva como registro local de lo ocurrido; no se borra.
  */
+/**
+ * Deja encolados los folios de una venta que nunca va a subir, para declararlos
+ * al servidor en cuanto haya red.
+ *
+ * Los dos caminos por los que un folio muere localmente pasan por acá: anular en
+ * taquilla y descartar una rechazada. Si no se declara, ese folio queda como
+ * **sin rendir** del lado del servidor, que es exactamente la marca que deja un
+ * cobro desviado — o sea que callarse un descarte legítimo se ve igual que
+ * robar.
+ *
+ * El monto se busca por folio en el espejo de tickets locales: con guía sin
+ * carnet son dos pases con importes distintos y declarar el total en cada uno
+ * duplicaría la cifra en el cuadre.
+ */
+export async function encolarDescartes(
+  venta: VentaPendienteLocal,
+  motivo: string | undefined,
+  tipo: 'DESCARTADO' | 'ANULADO',
+): Promise<void> {
+  if (venta.folios.length === 0) return
+
+  const fechaDescarte = new Date().toISOString()
+  const tickets = await db.ticketsLocales
+    .where('numeroTicket')
+    .anyOf(venta.folios.map((f) => f.numeroTicket))
+    .toArray()
+  const montoPorFolio = new Map(tickets.map((t) => [t.numeroTicket, t.montoTotal]))
+
+  const filas: DescartePendienteLocal[] = venta.folios.map((folio, i) => ({
+    idLocal: venta.idLocal,
+    numeroTicket: folio.numeroTicket,
+    firma: folio.firma,
+    // Si el espejo no tiene el ticket, el total va en el primer folio y 0 en el
+    // resto: mejor declarar de menos en uno que contar el mismo dinero dos veces.
+    montoCobrado:
+      montoPorFolio.get(folio.numeroTicket) ?? (i === 0 ? venta.resumen.montoTotal : '0'),
+    fechaDescarte,
+    tipo,
+    motivo,
+    declarado: 0,
+    intentos: 0,
+  }))
+
+  await db.descartesPendientes.bulkPut(filas)
+}
+
 export async function anularVentaLocal(
   idLocal: string,
   datos: { motivo?: string; usuario?: string } = {},
 ): Promise<void> {
   const venta = await db.ventasPendientes.get(idLocal)
-  if (!venta) throw new Error('La venta ya no está en este dispositivo.')
+  if (!venta) throw new Error('La recaudación ya no está en este dispositivo.')
 
   if (venta.estado === 'anulada') return
 
   if (venta.estado === 'sincronizada') {
     throw new Error(
-      'Esta venta ya se subió al servidor. Anúlela desde el historial, con la caja de origen abierta.',
+      'Esta recaudación ya se subió al servidor. Anúlela desde el historial, con la caja de origen abierta.',
     )
   }
   if (venta.estado === 'enviando') {
-    throw new Error('La venta se está subiendo en este momento. Espere a que termine.')
+    throw new Error('La recaudación se está subiendo en este momento. Espere a que termine.')
   }
   // Un pase ya usado significa que alguien entró. Anularlo dejaría el ingreso
   // sin ticket que lo respalde, que es peor que el cobro que se quiere revertir.
-  if (venta.fechaUsoLocal) {
+  //
+  // Alcanza con que haya entrado UNO de los dos pases: con guía sin carnet son
+  // dos, y si entró el guía la venta tampoco se puede deshacer. Antes esto solo
+  // miraba `fechaUsoLocal`, que era de la venta entera; con el sello por folio
+  // hay que preguntar por todos.
+  const algunPaseUsado =
+    Boolean(venta.fechaUsoLocal) || Object.keys(venta.usosLocales ?? {}).length > 0
+  if (algunPaseUsado) {
     throw new Error(
-      'Este pase ya se utilizó para ingresar. No se puede anular una entrada ya consumida.',
+      'Uno de los pases de esta venta ya se utilizó para ingresar. No se puede anular una entrada ya consumida.',
     )
   }
+
+  // Antes de marcarla anulada: sus folios ya no van a ser ticket y hay que
+  // rendirlos igual. Va como ANULADO y no como descarte: acá no se tiró un
+  // cobro, la venta no llegó a existir, y mezclar los dos casos haría que las
+  // anulaciones normales —que son muchas— tapen a los descartes, que son los
+  // que alguien tiene que explicar.
+  await encolarDescartes(venta, datos.motivo, 'ANULADO')
 
   await db.transaction('rw', [db.ventasPendientes, db.ticketsLocales], async () => {
     await db.ventasPendientes.put({

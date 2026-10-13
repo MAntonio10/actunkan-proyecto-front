@@ -14,7 +14,7 @@
  * explícito y está fechado.
  */
 
-const VERSION = 'actunkan-v7'
+const VERSION = 'actunkan-v8'
 const CACHE_SHELL = `${VERSION}-shell`
 const CACHE_ESTATICOS = `${VERSION}-estaticos`
 const PAGINA_SIN_CONEXION = '/sin-conexion.html'

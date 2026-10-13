@@ -23,6 +23,7 @@ import {
   RespuestaHistorialTarifas,
   GuiaBackend,
   RespuestaGuias,
+  DispositivoTaquilla,
   AperturaCajaBackend,
   RespuestaAperturasCajas,
   RespuestaCajaActual,
@@ -42,11 +43,13 @@ import {
   RespuestaHistorialActividades,
   ImagenActividad,
   SectorParqueBackend,
-  RespuestaConfirmacionPago,
+  RespuestaEstadoCheckout,
   RespuestaPagoTicket,
   LoteOfflineBackend,
   RespuestaLoteActivo,
   VentaOffline,
+  DescarteOffline,
+  RespuestaDescartesOffline,
   RespuestaEmisionOffline,
   RespuestaConciliacionLote,
   RespuestaCatalogoReportes,
@@ -55,7 +58,27 @@ import {
   Dashboard,
 } from '@/tipos'
 
+/**
+ * Dirección del backend.
+ *
+ * `NEXT_PUBLIC_*` se incrusta en el paquete al COMPILAR, no se lee al arrancar: el
+ * valor que quede aquí es el que va a usar el navegador del visitante, así que
+ * tiene que estar definido en el entorno donde corre `next build`, no solo en el
+ * servidor que sirve las páginas.
+ *
+ * El localhost de reserva es para `npm run dev`. En una compilación de producción
+ * sin la variable, el aviso de abajo es lo único que avisa de que el paquete quedó
+ * apuntando a la máquina de quien compiló: ahí no falla nada visible, simplemente
+ * ninguna petición llega.
+ */
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+
+if (!process.env.NEXT_PUBLIC_API_URL && process.env.NODE_ENV === 'production') {
+  console.error(
+    '[api] NEXT_PUBLIC_API_URL no estaba definida al compilar: el paquete quedó ' +
+      'apuntando a http://localhost:4000 y ninguna petición va a llegar.',
+  )
+}
 
 /** El xlsx que devuelven las rutas de reportes. */
 const TIPO_EXCEL =
@@ -84,8 +107,9 @@ function rutaDe(endpoint: string): string {
 function esEndpointPublico(endpoint: string): boolean {
   const ruta = rutaDe(endpoint)
   if (ENDPOINTS_PUBLICOS.includes(ruta)) return true
-  // Ruta pública para confirmación de cobro desde pasarela Recurrente (sin sesión de usuario)
-  if (/^\/pagos\/checkout\/[^/]+\/confirmar$/.test(ruta)) return true
+  // Ruta pública de consulta del cobro, para la página de éxito: quien paga no
+  // tiene sesión en el sistema. Es de solo lectura; quien confirma es el webhook.
+  if (/^\/pagos\/checkout\/[^/]+$/.test(ruta)) return true
   return false
 }
 
@@ -95,9 +119,20 @@ function el401EsDeNegocio(endpoint: string): boolean {
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  /**
+   * El cuerpo JSON del error, tal como lo mandó el backend.
+   *
+   * Se conserva porque el código HTTP a veces no alcanza para decidir qué
+   * mostrar: en `/tickets/validar` un 409 puede ser un pase reusado —alguien
+   * intentando entrar dos veces— o uno emitido sin conexión que todavía no se
+   * subió, y al portero hay que decirle cosas distintas. Un campo del cuerpo lo
+   * distingue sin tener que adivinar leyendo el mensaje.
+   */
+  cuerpo?: unknown
+  constructor(message: string, status: number, cuerpo?: unknown) {
     super(message)
     this.status = status
+    this.cuerpo = cuerpo
   }
 }
 
@@ -320,8 +355,10 @@ async function ejecutarConAuth(endpoint: string, options: RequestInit = {}): Pro
 
   if (!response.ok) {
     let errorMessage = `Error HTTP ${response.status}`
+    let cuerpoError: unknown
     try {
       const errorData = await response.json()
+      cuerpoError = errorData
       if (Array.isArray(errorData.message)) {
         errorMessage = errorData.message.join(', ')
       } else if (errorData.message) {
@@ -343,7 +380,7 @@ async function ejecutarConAuth(endpoint: string, options: RequestInit = {}): Pro
       }
     }
 
-    throw new ApiError(errorMessage, response.status)
+    throw new ApiError(errorMessage, response.status, cuerpoError)
   }
 
   return response
@@ -624,10 +661,12 @@ export const api = {
     getBitacora: (params?: FiltrosBitacora) => {
       const queryParams = new URLSearchParams()
       if (params?.idUsuario) queryParams.append('idUsuario', String(params.idUsuario))
+      if (params?.buscar) queryParams.append('buscar', params.buscar)
       if (params?.modulo) queryParams.append('modulo', params.modulo)
       if (params?.accion) queryParams.append('accion', params.accion)
       if (params?.fechaInicio) queryParams.append('fechaInicio', params.fechaInicio)
       if (params?.fechaFin) queryParams.append('fechaFin', params.fechaFin)
+      if (params?.orden) queryParams.append('orden', params.orden)
       if (params?.pagina) queryParams.append('pagina', String(params.pagina))
       if (params?.limite) queryParams.append('limite', String(params.limite))
       const queryStr = queryParams.toString()
@@ -691,53 +730,65 @@ export const api = {
       }),
 
     // Control de acceso en taquilla: recibe el contenido decodificado del QR.
-    validar: (data: { numeroTicket: string; firma?: string }) =>
+    /**
+     * `dispositivo` va solo cuando el pase lo firmó una taquilla con su propia
+     * llave. Sin ese campo el servidor verifica con HMAC como siempre, así que
+     * los pases ya impresos siguen validando igual.
+     */
+    validar: (data: { numeroTicket: string; firma?: string; dispositivo?: string }) =>
       request<RespuestaValidacionTicket>('/tickets/validar', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
 
     // ---- Emisión sin conexión. Contrato en ESPECIFICACION_OFFLINE.md ----
+    //
+    // Ya no hay reserva de folios ni lotes: cada taquilla numera y firma los
+    // suyos (ver `lib/dispositivo_taquilla.ts`). Los endpoints de lote siguen
+    // existiendo en el backend para drenar colas viejas, pero este cliente ya no
+    // los habla.
 
-    // Folios pre-firmados para vender sin red. El servidor toma la caja abierta
-    // actual; el cliente no la elige.
-    reservarLoteOffline: (data: { cantidad: number; idDispositivo: string }) =>
-      request<LoteOfflineBackend>('/tickets/lotes-offline', {
+    /**
+     * Declara folios que nunca van a ser ticket: anulados en taquilla o
+     * rechazados y descartados por el operador.
+     *
+     * Exige `Sincronizacion.Anular` y admite usuario anulado, igual que la
+     * subida. Reintentar es seguro: la segunda vez responde
+     * `DUPLICADO_IGNORADO` y no cuenta el folio dos veces.
+     *
+     * Una taquilla revocada SÍ puede declarar, al revés que emitir: es el caso
+     * donde más importa, porque lo que ese equipo cobró tiene que poder
+     * rendirse igual.
+     */
+    declararDescartes: (data: {
+      dispositivo: string
+      idAperturaCaja: number
+      descartes: DescarteOffline[]
+    }) =>
+      request<RespuestaDescartesOffline>('/tickets/descartes-offline', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
 
-    // Recupera el lote vigente tras reinstalar la app o perder el almacenamiento
-    // local; sin esto los folios quedan inservibles hasta que expiren.
-    loteOfflineActivo: (idDispositivo: string) =>
-      request<RespuestaLoteActivo>(
-        `/tickets/lotes-offline/activo?idDispositivo=${encodeURIComponent(idDispositivo)}`,
-      ),
-
     // Sube la cola. Responde éxito parcial por venta: una rechazada no arrastra
-    // a las demás del lote.
-    emitirOffline: (data: { idLote: number; ventas: VentaOffline[] }) =>
+    // a las demás de la tanda.
+    //
+    // Dos modos y **exactamente uno por llamada**: `idLote` para las ventas del
+    // modelo de folios reservados, o `dispositivo` + `idAperturaCaja` para las
+    // que firmó la taquilla. Mandar los dos responde 400: cada modo asigna la
+    // venta a una caja distinta, y aceptar ambos dejaría en manos del cliente a
+    // qué arqueo entra el dinero.
+    emitirOffline: (
+      data:
+        | { idLote: number; ventas: VentaOffline[] }
+        | { dispositivo: string; idAperturaCaja: number; ventas: VentaOffline[] },
+    ) =>
       request<RespuestaEmisionOffline>('/tickets/emitir-offline', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
 
-    // Cierra el lote: los folios sin usar pasan a NO_UTILIZADO para que la
-    // auditoría no vea huecos en la secuencia. Requisito para cerrar la caja.
-    conciliarLoteOffline: (
-      idLote: number,
-      data: { foliosUtilizados: string[]; foliosNoUtilizados: string[] },
-    ) =>
-      request<RespuestaConciliacionLote>(`/tickets/lotes-offline/${idLote}/conciliar`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
 
-    // Solo para dispositivo perdido: destruye las ventas offline no subidas.
-    invalidarLoteOffline: (idLote: number) =>
-      request<{ mensaje?: string }>(`/tickets/lotes-offline/${idLote}`, {
-        method: 'DELETE',
-      }),
   },
 
   // 9. Guías (módulo EmisionTickets)
@@ -783,6 +834,39 @@ export const api = {
       request<GuiaBackend>(`/guias/${id}`, {
         method: 'DELETE',
       }),
+  },
+
+  // 9b. Dispositivos de taquilla (módulo Sincronizacion)
+  //
+  // Cada taquilla registra su llave pública una vez y con eso firma sus propios
+  // pases sin conexión. Ver `lib/dispositivo_taquilla.ts`.
+  //
+  // El módulo `Sincronizacion` gobierna la ADMINISTRACIÓN de dispositivos, no la
+  // pantalla /sincronizacion: operar la propia cola —ver pendientes, subirlas,
+  // conciliar— sigue bajo `EmisionTickets`, para que nadie quede sin poder
+  // liquidar lo que cobró. El reparto:
+  //   Sincronizacion.Ver     -> registrar y listar taquillas
+  //   Sincronizacion.Anular  -> lo destructivo: revocar una taquilla y
+  //                             descartar un cobro que no llegó a subir
+  dispositivos: {
+    /** Alta idempotente por `idDispositivo`: volver a registrar el mismo
+     *  dispositivo no crea otra taquilla. Exige `Sincronizacion.Ver`. */
+    registrar: (data: { idDispositivo: string; nombre?: string; llavePublica: string }) =>
+      request<DispositivoTaquilla>('/dispositivos', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    /** Exige `Sincronizacion.Ver`. */
+    listar: (incluirRevocados = false) =>
+      request<DispositivoTaquilla[]>(
+        `/dispositivos${incluirRevocados ? '?incluirRevocados=true' : ''}`,
+      ),
+
+    /** Revoca la taquilla: sus pases dejan de validar. `Sincronizacion.Anular`. */
+    revocar: (id: number) => request<DispositivoTaquilla>(`/dispositivos/${id}`, {
+      method: 'DELETE',
+    }),
   },
 
   // 10. Tarifas (módulo EmisionTickets)
@@ -970,12 +1054,15 @@ export const api = {
 
   // 14. Pasarela de Pagos (Recurrente / Tarjeta)
   pagos: {
-    // Confirmación pública invocada por la página de éxito tras el checkout de Recurrente.
-    // Consulta a Recurrente y marca el cobro como PAGADO si status === "paid".
-    confirmar: (idCheckout: string) =>
-      request<RespuestaConfirmacionPago>(`/pagos/checkout/${idCheckout}/confirmar`, {
-        method: 'POST',
-      }),
+    // Estado del cobro para la página de éxito. Es SOLO LECTURA: no consulta a la
+    // pasarela y no escribe nada. Quien confirma el pago es el webhook que recibe el
+    // backend, así que esto se limita a mirar lo que ya quedó registrado.
+    //
+    // Reemplazó al `POST .../confirmar`, que preguntaba a la pasarela desde el
+    // navegador: con aquello, un pago real se quedaba sin confirmar para siempre si
+    // el visitante cerraba la pestaña antes de volver a esta página.
+    estadoDeCheckout: (idCheckout: string) =>
+      request<RespuestaEstadoCheckout>(`/pagos/checkout/${idCheckout}`),
 
     // Consulta interna del estado de cobro de un ticket y su link de checkout.
     getPorTicket: (idTicket: number) =>

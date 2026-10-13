@@ -20,35 +20,31 @@ import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
-import { estadoFolios, type EstadoFolios } from '@/lib/folios_offline'
 import {
   fijarModoAutomatico,
   sincronizar,
   suscribirSincronizacion,
   type EstadoSincronizacion,
 } from '@/lib/sincronizador_tickets'
+import { formatearInstante } from '@/lib/fecha_guatemala'
 
 /**
  * Estado de la venta sin conexión, para la barra superior.
  *
  * Muestra tres cosas que el taquillero necesita saber sin tener que buscarlas:
- * si hay red, cuántas ventas faltan por subir y cuántos folios quedan. También
+ * si hay red y cuánta recaudación falta por subir. También
  * expone la subida manual, para los casos en que el automático está apagado o
  * la conexión es intermitente.
  */
 export function IndicadorSincronizacion() {
   const { enLinea, sesionSinConexion, soloSincronizacion, avisoSesion } = useAutenticacion()
   const [estado, setEstado] = useState<EstadoSincronizacion | null>(null)
-  const [folios, setFolios] = useState<EstadoFolios | null>(null)
 
   useEffect(() => suscribirSincronizacion(setEstado), [])
 
   useEffect(() => {
     let vigente = true
     const leer = () => {
-      void estadoFolios().then((f) => {
-        if (vigente) setFolios(f)
-      })
     }
     leer()
     const intervalo = setInterval(leer, 30_000)
@@ -79,11 +75,11 @@ export function IndicadorSincronizacion() {
   const subirAhora = async () => {
     const resultado = await sincronizar({ forzar: true })
     if (resultado.pendientes === 0 && resultado.rechazadas === 0) {
-      toast.success('Todas las ventas están sincronizadas')
+      toast.success('Toda la recaudación está sincronizada')
     } else if (resultado.ultimoError) {
       toast.error('No se pudo sincronizar', { description: resultado.ultimoError })
     } else {
-      toast.info(`Quedan ${resultado.pendientes} ventas por subir`)
+      toast.info(`Quedan ${resultado.pendientes} recaudaciones por subir`)
     }
   }
 
@@ -137,7 +133,7 @@ export function IndicadorSincronizacion() {
             <p className="font-bold">Sesión limitada a sincronización</p>
             <p className="leading-relaxed">
               {avisoSesion ??
-                'Su usuario fue deshabilitado. Esta sesión solo permite subir y conciliar las ventas offline pendientes.'}
+                'Su usuario fue deshabilitado. Esta sesión solo permite subir y conciliar la recaudación offline pendiente.'}
             </p>
           </div>
         )}
@@ -151,7 +147,7 @@ export function IndicadorSincronizacion() {
 
         <dl className="text-xs space-y-1.5">
           <div className="flex justify-between">
-            <dt className="text-muted-foreground">Ventas por subir</dt>
+            <dt className="text-muted-foreground">Recaudación por subir</dt>
             <dd className="font-semibold">{pendientes}</dd>
           </div>
           {retenidas > 0 && (
@@ -172,14 +168,10 @@ export function IndicadorSincronizacion() {
               <dd className="font-semibold">{estado?.anuladas}</dd>
             </div>
           )}
-          <div className="flex justify-between">
-            <dt className="text-muted-foreground">Folios disponibles</dt>
-            <dd className="font-semibold">{folios?.disponibles ?? '—'}</dd>
-          </div>
           {estado?.ultimaSincronizacion && (
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Última subida</dt>
-              <dd>{new Date(estado.ultimaSincronizacion).toLocaleTimeString('es-GT')}</dd>
+              <dd>{formatearInstante(estado.ultimaSincronizacion, { timeStyle: 'medium' })}</dd>
             </div>
           )}
         </dl>
@@ -190,7 +182,7 @@ export function IndicadorSincronizacion() {
 
         {requierenAtencion > 0 && (
           <p className="text-xs text-destructive">
-            Hay ventas cobradas que no quedaron bien registradas. Resuélvalas en Sincronización
+            Hay recaudación cobrada que no quedó bien registrada. Resuélvala en Sincronización
             antes de cerrar la caja o el arqueo no va a cuadrar.
           </p>
         )}

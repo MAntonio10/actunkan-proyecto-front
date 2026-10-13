@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Empaqueta el servidor con solo las dependencias que de verdad usa, en
+  // `.next/standalone`. Es lo que permite que la imagen de Docker no lleve
+  // `node_modules` entero: pasa de cientos de megas a decenas.
+  output: 'standalone',
+
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -34,8 +39,18 @@ const nextConfig = {
       ],
     },
   },
-  // Cabeceras CORS para facilitar la comunicación en red local
+  /**
+   * Cabeceras CORS para probar desde el teléfono en la red local.
+   *
+   * SOLO EN DESARROLLO, y la condición no es un detalle. Estas cabeceras las
+   * emite el propio frontend sobre SUS rutas, así que en producción le estarían
+   * diciendo al navegador que cualquier sitio web puede leer las respuestas de
+   * esta aplicación. El CORS que de verdad hace falta es el del backend, que sale
+   * de su `APP_URL`; esto nunca sirvió para eso.
+   */
   async headers() {
+    if (process.env.NODE_ENV === 'production') return []
+
     return [
       {
         source: '/:path*',

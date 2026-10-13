@@ -218,6 +218,25 @@ function BotonFormato({
   )
 }
 
+/**
+ * Reportes que existen en el catálogo pero no se ofrecen como tarjeta acá.
+ *
+ * Ninguno se borra del backend: siguen respondiendo por `GET /reportes/:clave` y
+ * los sigue resolviendo la pestaña de IA. Lo que se quita es la tarjeta.
+ *
+ * - `ventas-a-medida`: es justamente el que resuelve la pestaña de IA, donde sí
+ *   tiene sentido, porque su gracia es que la forma del reporte la decide la
+ *   pregunta escrita. Como tarjeta no aportaba: un formulario de cuatro
+ *   parámetros sin una forma propia que mostrar.
+ * - `bitacora-detalle` y `bitacora-resumen`: la bitácora se descarga desde su
+ *   propio módulo, con los filtros de esa pantalla y su Excel. Tenerlos también
+ *   acá era ofrecer dos caminos al mismo dato, cada uno con filtros distintos.
+ *
+ * Al quedar sin reportes visibles, la categoría «Bitácora» desaparece sola del
+ * selector: los conteos se calculan sobre esta misma lista filtrada.
+ */
+const CLAVES_OCULTAS = new Set(['ventas-a-medida', 'bitacora-detalle', 'bitacora-resumen'])
+
 export function ReportesPredeterminados({
   catalogo,
   puedeExportar,
@@ -226,6 +245,14 @@ export function ReportesPredeterminados({
   /** Sin `Reportes.Exportar` solo se ofrece la vista en pantalla. */
   puedeExportar: boolean
 }) {
+  // Se filtra una sola vez y todo lo de abajo lee de acá — tarjetas, conteos
+  // por categoría, buscador y el "N disponibles" —, para que ninguno cuente un
+  // reporte que no se muestra.
+  const reportesVisibles = useMemo(
+    () => catalogo.datos.filter((reporte) => !CLAVES_OCULTAS.has(reporte.clave)),
+    [catalogo],
+  )
+
   // El mes en curso es lo que el backend asume sin fechas: así el formulario
   // muestra lo que va a pedir en vez de un comportamiento implícito.
   const [periodo, setPeriodo] = useState<RangoFechas>(rangoMesEnCurso)
@@ -235,7 +262,7 @@ export function ReportesPredeterminados({
   /**
    * Filtros propios de los reportes, por nombre de parámetro. Sobreviven al
    * cambio de reporte: los de venta comparten los mismos siete, y quien fijó
-   * un vendedor espera verlo puesto en el siguiente. No se cuelan donde no
+   * un colaborador espera verlo puesto en el siguiente. No se cuelan donde no
    * corresponde porque la query solo lleva lo que el reporte declara.
    */
   const [valores, setValores] = useState<ValoresFiltrosReporte>({})
@@ -252,8 +279,8 @@ export function ReportesPredeterminados({
   const vistaRef = useRef<HTMLDivElement>(null)
 
   const definicion = useMemo(
-    () => catalogo.datos.find((item) => item.clave === claveSeleccionada) ?? null,
-    [catalogo, claveSeleccionada],
+    () => reportesVisibles.find((item) => item.clave === claveSeleccionada) ?? null,
+    [reportesVisibles, claveSeleccionada],
   )
   const filtroPeriodo = definicion?.filtros.find((filtro) => filtro.tipo === 'rangoFechas')
 
@@ -287,15 +314,15 @@ export function ReportesPredeterminados({
 
   const conteoPorCategoria = useMemo(() => {
     const conteo = new Map<string, number>()
-    for (const reporte of catalogo.datos) {
+    for (const reporte of reportesVisibles) {
       conteo.set(reporte.categoria, (conteo.get(reporte.categoria) ?? 0) + 1)
     }
     return [...conteo.entries()].sort((a, b) => posicionCategoria(a[0]) - posicionCategoria(b[0]))
-  }, [catalogo])
+  }, [reportesVisibles])
 
   const grupos = useMemo(() => {
     const termino = normalizarNombreModulo(busqueda)
-    const visibles = catalogo.datos.filter(
+    const visibles = reportesVisibles.filter(
       (reporte) =>
         (!categoria || reporte.categoria === categoria) &&
         (!termino ||
@@ -304,7 +331,7 @@ export function ReportesPredeterminados({
           ).includes(termino)),
     )
     return agruparPorCategoria(visibles)
-  }, [catalogo, categoria, busqueda])
+  }, [reportesVisibles, categoria, busqueda])
 
   /**
    * Deja el paso 3 —y sus botones de descarga— a la vista. En pantallas
@@ -388,14 +415,14 @@ export function ReportesPredeterminados({
             <EncabezadoPaso
               numero={2}
               titulo="Elija el reporte"
-              descripcion={`${catalogo.total} disponibles para su usuario`}
+              descripcion={`${reportesVisibles.length} disponibles para su usuario`}
             />
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Categorías">
                 {[
-                  { clave: null, etiqueta: 'Todos', cantidad: catalogo.datos.length },
+                  { clave: null, etiqueta: 'Todos', cantidad: reportesVisibles.length },
                   ...conteoPorCategoria.map(([nombre, cantidad]) => ({
                     clave: nombre,
                     etiqueta: nombre,
@@ -438,7 +465,12 @@ export function ReportesPredeterminados({
 
             {grupos.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Ningún reporte coincide con la búsqueda.
+                {/* Sin nada visible no es que la búsqueda no encontró: es que a
+                    este usuario no le queda ningún reporte en esta pestaña,
+                    típicamente porque los suyos son los de bitácora. */}
+                {reportesVisibles.length === 0
+                  ? 'Su usuario no tiene reportes disponibles en esta pestaña. La bitácora se descarga desde su propio módulo.'
+                  : 'Ningún reporte coincide con la búsqueda.'}
               </p>
             ) : (
               grupos.map(([nombre, reportes]) => {

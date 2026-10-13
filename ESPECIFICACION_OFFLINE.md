@@ -1,5 +1,24 @@
 # Especificación backend — Emisión de tickets offline
 
+> ## ⚠️ Describe el modelo anterior
+>
+> Este documento especifica el modelo de **folios pre-firmados por lote**, que **ya no es el que se
+> usa**. El vigente es otro: **cada taquilla firma sus propios pases** con un par de llaves ECDSA
+> P-256 propio (privada no extraíble), registrado con `POST /dispositivos`; numera y firma sus
+> folios sola, así que no se le agotan. No hay lote, ni reserva, ni conciliación.
+>
+> **Sigue valiendo** —y es la razón de conservarlo, porque explica el *porqué* de cada regla—:
+> la semántica de la cola, la idempotencia por `idLocal`, el resultado **por ítem** (una venta
+> rechazada no arrastra a las demás), el acotado de la fecha, que sin conexión solo se vende en
+> efectivo, y qué falla si se quita cada una.
+>
+> **Léase como historia** todo lo que hable de: reserva de folios, lotes, los estados de
+> `FolioReservado`, la conciliación, y la caja atada al lote. Son 45 menciones de «lote» en estas
+> páginas; ninguna describe el sistema actual.
+>
+> El modelo vigente está en `DOCUMENTACION_ENDPOINTS.md` § 18 y en la sección «Offline» de
+> `CLAUDE.md`.
+
 > **Ya implementado. La autoridad es `DOCUMENTACION_ENDPOINTS.md` § 18**, que documenta el contrato
 > tal como quedó construido. Este documento se conserva porque explica el *porqué* de cada regla
 > —qué falla si se quita— pero donde ambos difieran, manda la sección 18.

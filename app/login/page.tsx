@@ -163,7 +163,7 @@ export default function AutenticacionPage() {
     try {
       const usuarioLocal = await iniciarSesionSinConexion(correo, contrasena);
       toast.success("Sesión iniciada sin conexión", {
-        description: `${usuarioLocal.nombre} · Las ventas se subirán al recuperar internet`,
+        description: `${usuarioLocal.nombre} · La recaudación se subirá al recuperar internet`,
       });
       router.push("/registro-visitantes");
     } catch (err: unknown) {

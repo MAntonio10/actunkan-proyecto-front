@@ -16,7 +16,6 @@ import {
   PlayCircle,
   RefreshCw,
   ShieldAlert,
-  Ticket,
   Trash2,
   TriangleAlert,
   Wifi,
@@ -56,16 +55,9 @@ import { hayCriptoDisponible } from '@/lib/cripto_offline'
 import { diagnosticarOffline, type DiagnosticoOffline } from '@/lib/diagnostico_offline'
 import { anularVentaLocal, aplicarSeleccionDeSubida } from '@/lib/emision_offline'
 import {
-  asegurarFolios,
-  conciliarLoteActual,
-  estadoFolios,
-  ErrorVentasPendientes,
-  TAMANO_LOTE,
-  UMBRAL_AVISO,
-  type EstadoFolios,
-} from '@/lib/folios_offline'
-import {
   descartarVentaRechazada,
+  reenviarVentaRechazada,
+  esReenviable,
   estadoActual,
   fijarModoAutomatico,
   sincronizar,
@@ -73,6 +65,7 @@ import {
   type EstadoSincronizacion,
 } from '@/lib/sincronizador_tickets'
 import { type VentaPendienteLocal } from '@/tipos'
+import { formatearInstante } from '@/lib/fecha_guatemala'
 
 /**
  * Panel de la operación sin conexión.
@@ -95,7 +88,7 @@ function hora(valor?: string | null): string {
   if (!valor) return '—'
   const fecha = new Date(valor)
   if (isNaN(fecha.getTime())) return '—'
-  return fecha.toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' })
+  return formatearInstante(valor, { dateStyle: 'short', timeStyle: 'short' })
 }
 
 interface ConfigEstado {
@@ -140,10 +133,21 @@ function configDe(venta: VentaPendienteLocal): ConfigEstado {
 }
 
 export default function SincronizacionPage() {
-  const { enLinea, soloSincronizacion, avisoSesion, usuario } = useAutenticacion()
+  const { enLinea, soloSincronizacion, avisoSesion, usuario, puedeAccion } = useAutenticacion()
+
+  /**
+   * Descartar es tirar un cobro que ya se hizo: el dinero quedó en el cajón y el
+   * ticket no va a existir nunca en el servidor. Por eso pide permiso propio.
+   *
+   * OJO: hoy este gateo es *solo* de interfaz. El descarte ocurre contra
+   * IndexedDB y nunca sale del dispositivo, así que nada lo verifica del lado
+   * del servidor. Será exigible de verdad cuando el dispositivo declare lo
+   * descartado al sincronizar y el backend rechace lo que el usuario no podía
+   * descartar; hasta entonces esto disuade, no impide.
+   */
+  const puedeDescartar = puedeAccion('Sincronizacion', 'Anular')
 
   const [estado, setEstado] = useState<EstadoSincronizacion | null>(null)
-  const [folios, setFolios] = useState<EstadoFolios | null>(null)
   const [ventas, setVentas] = useState<VentaPendienteLocal[]>([])
   const [trabajando, setTrabajando] = useState(false)
   const [persistente, setPersistente] = useState<boolean | null>(null)
@@ -160,9 +164,8 @@ export default function SincronizacionPage() {
   const [seleccion, setSeleccion] = useState<Record<string, boolean>>({})
 
   const releer = useCallback(async () => {
-    const [cola, inventario, protegido, espacio] = await Promise.all([
+    const [cola, protegido, espacio] = await Promise.all([
       db.ventasPendientes.orderBy('fechaCreacion').reverse().toArray(),
-      estadoFolios(),
       almacenamientoEsPersistente(),
       usoDeAlmacenamiento(),
     ])
@@ -171,7 +174,6 @@ export default function SincronizacionPage() {
     // Las ya subidas salen de la lista: no piden nada. Las anuladas se quedan
     // como registro de lo ocurrido en el turno.
     setVentas(cola.filter((v) => v.estado !== 'sincronizada'))
-    setFolios(inventario)
   }, [])
 
   useEffect(() => {
@@ -282,40 +284,12 @@ export default function SincronizacionPage() {
       toast.success('Selección guardada', {
         description:
           excluidas === 0
-            ? `Las ${marcadas.length} ventas se subirán en la próxima sincronización.`
+            ? `Las ${marcadas.length} recaudaciones se subirán en la próxima sincronización.`
             : `${marcadas.length} se subirán y ${excluidas} quedan retenidas. Pulse Subir ahora cuando quiera enviarlas.`,
       })
     })
 
-  const reponerFolios = () =>
-    conProteccion(async () => {
-      try {
-        const nuevo = await asegurarFolios(TAMANO_LOTE)
-        toast.success(`Inventario actualizado: ${nuevo.disponibles} folios disponibles`)
-      } catch (error) {
-        toast.error('No se pudieron reservar folios', {
-          description: error instanceof Error ? error.message : undefined,
-        })
-      }
-    })
 
-  const conciliar = () =>
-    conProteccion(async () => {
-      try {
-        await conciliarLoteActual()
-        toast.success('Lote conciliado', {
-          description: 'Los folios sin usar quedaron cerrados. Ya se puede cerrar la caja.',
-        })
-      } catch (error) {
-        if (error instanceof ErrorVentasPendientes) {
-          toast.error('Quedan ventas sin resolver', { description: error.message })
-          return
-        }
-        toast.error('No se pudo conciliar', {
-          description: error instanceof Error ? error.message : undefined,
-        })
-      }
-    })
 
   const confirmarAnulacion = () =>
     conProteccion(async () => {
@@ -325,7 +299,7 @@ export default function SincronizacionPage() {
           motivo: motivoAnulacion.trim() || undefined,
           usuario: usuario?.nombre,
         })
-        toast.success('Venta anulada', {
+        toast.success('Recaudación anulada', {
           description: 'No se subirá al servidor. El folio se cerrará al conciliar el lote.',
         })
       } catch (error) {
@@ -341,8 +315,15 @@ export default function SincronizacionPage() {
   const confirmarDescarte = () =>
     conProteccion(async () => {
       if (!aDescartar) return
-      await descartarVentaRechazada(aDescartar.idLocal)
-      toast.info('Venta descartada del dispositivo', {
+      // El motivo viaja al servidor y queda en bitácora con el monto: conviene
+      // que diga por qué lo rechazaron y no solo "descartado".
+      await descartarVentaRechazada(
+        aDescartar.idLocal,
+        aDescartar.ultimoError
+          ? `Descartada en taquilla · ${aDescartar.ultimoError}`
+          : undefined,
+      )
+      toast.info('Recaudación descartada del dispositivo', {
         description: 'Registre el faltante al cerrar la caja.',
       })
       setADescartar(null)
@@ -350,6 +331,15 @@ export default function SincronizacionPage() {
 
   const idDispositivo = typeof window !== 'undefined' ? obtenerIdDispositivo() : ''
 
+  // Gateada en `EmisionTickets` y NO en `Sincronizacion`, aunque ese módulo
+  // exista en el backend desde que se administran dispositivos. Es a propósito:
+  // esta es la única pantalla donde se resuelven las ventas a medias, y esas
+  // bloquean el cierre de caja. Si hiciera falta un permiso aparte, bastaría con
+  // que a un taquillero recién dado de alta se lo olvidaran para dejarlo con
+  // dinero cobrado en el cajón y sin forma de cerrar su turno. Quien puede
+  // emitir tiene que poder liquidar lo que emitió.
+  //
+  // Lo que sí pide `Sincronizacion.Anular` es Descartar (ver `puedeDescartar`).
   return (
     <RutaProtegida moduloRequerido="EmisionTickets">
       <div className="min-h-screen flex flex-col">
@@ -363,7 +353,7 @@ export default function SincronizacionPage() {
                 Sincronización
               </h1>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Ventas sin subir, folios reservados y estado del modo sin conexión
+                Recaudación sin subir y estado del modo sin conexión
               </p>
             </div>
 
@@ -396,7 +386,7 @@ export default function SincronizacionPage() {
                   <p className="font-bold">Sesión limitada a sincronización</p>
                   <p className="mt-0.5">
                     {avisoSesion ??
-                      'Su usuario fue deshabilitado. Esta sesión solo permite subir y conciliar las ventas offline pendientes.'}
+                      'Su usuario fue deshabilitado. Esta sesión solo permite subir y conciliar la recaudación offline pendiente.'}
                   </p>
                 </div>
               </CardContent>
@@ -404,7 +394,7 @@ export default function SincronizacionPage() {
           )}
 
           {/* Resumen */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className={enLinea ? 'border-primary/30 bg-primary/5' : 'border-amber-500/40 bg-amber-500/10'}>
               <CardContent className="p-4 flex items-center gap-3">
                 <div
@@ -463,115 +453,18 @@ export default function SincronizacionPage() {
             <div className="rounded-lg border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-xs flex items-start gap-2">
               <PauseCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
-                Hay {moneda(totales.retenido)} en ventas retenidas. El dinero está cobrado pero
+                Hay {moneda(totales.retenido)} en recaudación retenida. El dinero está cobrado pero
                 fuera del sistema, y el cierre de caja seguirá bloqueado hasta que las libere o las
                 anule.
               </span>
             </div>
           )}
 
-          {/* Folios */}
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Ticket className="h-5 w-5 text-primary" />
-                  Folios para venta sin conexión
-                </CardTitle>
-                <CardDescription>
-                  Números de ticket pre-firmados por el servidor. Solo se gastan vendiendo sin red.
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={reponerFolios}
-                  disabled={trabajando || !enLinea}
-                  className="gap-2 cursor-pointer"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Reponer
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={conciliar}
-                  disabled={trabajando || !enLinea || folios?.idLote == null}
-                  className="gap-2 cursor-pointer"
-                >
-                  <CheckCircle className="h-4 w-4" />
-                  Conciliar lote
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {folios?.idLote == null ? (
-                <p className="text-sm text-muted-foreground">
-                  No hay folios reservados en este dispositivo.{' '}
-                  {enLinea
-                    ? 'Pulse Reponer, o abra la pantalla de emisión con una caja abierta.'
-                    : 'Se necesita conexión y una caja abierta para reservarlos.'}
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Disponibles</p>
-                    <p
-                      className={cn(
-                        'text-xl font-bold',
-                        folios.disponibles === 0
-                          ? 'text-destructive'
-                          : folios.bajoUmbral
-                            ? 'text-amber-600'
-                            : 'text-foreground',
-                      )}
-                    >
-                      {folios.disponibles}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">aviso bajo {UMBRAL_AVISO}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Consumidos</p>
-                    <p className="text-xl font-bold">{folios.consumidos}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Lote</p>
-                    <p className="text-xl font-bold font-mono">#{folios.idLote}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Vence</p>
-                    <p className="text-sm font-semibold">{hora(folios.expiraEn)}</p>
-                    {folios.vencido && (
-                      <Badge
-                        variant="outline"
-                        className="mt-1 text-[10px] border-amber-500/50 text-amber-700 dark:text-amber-400 bg-amber-500/15"
-                      >
-                        Vencido
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {folios?.bloqueado && (
-                <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
-                  <KeyRound className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    Los folios están bloqueados. La llave que los descifra se arma al iniciar
-                    sesión y se descarta al cerrar la aplicación: vuelva a iniciar sesión para
-                    poder vender sin conexión.
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           {/* Cola */}
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
               <div>
-                <CardTitle className="text-lg">Cola de ventas</CardTitle>
+                <CardTitle className="text-lg">Cola de recaudación</CardTitle>
                 <CardDescription>
                   {personalizando
                     ? 'Marque en verde las que quiere subir y en rojo las que no. Nada se aplica hasta confirmar.'
@@ -634,7 +527,7 @@ export default function SincronizacionPage() {
               {personalizando && (
                 <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs flex items-center justify-between gap-3 flex-wrap">
                   <span>
-                    Quedarán marcadas para subir <strong>{marcadas.length}</strong> ventas por{' '}
+                    Quedarán marcadas para subir <strong>{marcadas.length}</strong> recaudaciones por{' '}
                     <strong>{moneda(montoMarcado)}</strong>. Las{' '}
                     {seleccionables.length - marcadas.length} restantes quedan retenidas. Nada se
                     envía hasta pulsar <strong>Subir ahora</strong>.
@@ -671,7 +564,7 @@ export default function SincronizacionPage() {
                   <CheckCircle className="h-10 w-10 text-primary mx-auto mb-2" />
                   <p className="font-medium">No hay nada pendiente</p>
                   <p className="text-sm text-muted-foreground">
-                    Todas las ventas de este dispositivo están en el servidor.
+                    Toda la recaudación de este dispositivo está en el servidor.
                   </p>
                 </div>
               ) : (
@@ -702,7 +595,7 @@ export default function SincronizacionPage() {
                               onCheckedChange={(valor) =>
                                 setSeleccion((prev) => ({ ...prev, [v.idLocal]: valor }))
                               }
-                              aria-label={`Subir la venta ${v.venta.numeroTicket}`}
+                              aria-label={`Subir la recaudación ${v.venta.numeroTicket}`}
                               className={cn(
                                 'mt-1 shrink-0 cursor-pointer',
                                 seleccion[v.idLocal]
@@ -748,6 +641,19 @@ export default function SincronizacionPage() {
                         </p>
                       )}
 
+                      {/* Falló el servidor, no la venta: queda en cola y se
+                          reintenta sola. Va en ámbar y no en rojo, y sin el
+                          botón Descartar, porque el taquillero no tiene nada
+                          que arreglar ni nada que decidir acá. */}
+                      {v.estado === 'pendiente' && v.ultimoError && !anulada && (
+                        <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 text-xs text-amber-700 flex items-start gap-2">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            {v.ultimoError} Sigue en la cola: <strong>no la descarte</strong>.
+                          </span>
+                        </div>
+                      )}
+
                       {v.estado === 'rechazada' && (
                         <div className="rounded-lg bg-destructive/10 border border-destructive/30 px-2.5 py-2 text-xs text-destructive flex items-start gap-2">
                           <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -755,6 +661,12 @@ export default function SincronizacionPage() {
                             {v.ultimoError}
                             {v.codigoRechazo === 'FOLIO_YA_EMITIDO' &&
                               ' Este folio se gastó dos veces: el cobro no va a poder registrarse.'}
+                            {v.codigoRechazo === 'CAJA_YA_CERRADA' &&
+                              ' La caja de origen ya se cerró. Reintentar no sirve: un supervisor tiene que registrarlo como ajuste posterior al cierre.'}
+                            {v.codigoRechazo === 'FOLIO_DE_OTRA_SERIE' &&
+                              ' El folio no es de la serie de esta taquilla.'}
+                            {v.codigoRechazo === 'FIRMA_INVALIDA' &&
+                              ' La firma no corresponde a la llave de esta taquilla; puede que se haya revocado el dispositivo.'}
                           </span>
                         </div>
                       )}
@@ -799,18 +711,43 @@ export default function SincronizacionPage() {
                           </Button>
                         )}
 
-                        {v.estado === 'rechazada' && (
+                        {/* Un rechazo por "modo equivocado" es recuperable:
+                            la venta vale, llegó por el camino que no era. Va
+                            primero y sin permiso especial — reencolar no
+                            destruye nada, a diferencia de descartar. */}
+                        {esReenviable(v) && (
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            onClick={() => setADescartar(v)}
+                            onClick={() => void reenviarVentaRechazada(v.idLocal)}
                             disabled={trabajando}
-                            className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive cursor-pointer ml-auto"
+                            className="h-8 gap-1.5 text-xs cursor-pointer"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Descartar
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            Reenviar
                           </Button>
                         )}
+
+                        {v.estado === 'rechazada' &&
+                          (puedeDescartar ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setADescartar(v)}
+                              disabled={trabajando}
+                              className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive cursor-pointer ml-auto"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Descartar
+                            </Button>
+                          ) : (
+                            // Sin el permiso no se esconde y ya: el cobro sigue
+                            // sin respaldo y alguien tiene que resolverlo, así
+                            // que se dice quién.
+                            <span className="ml-auto text-[11px] text-muted-foreground">
+                              Requiere permiso de anulación en Sincronización
+                            </span>
+                          ))}
                       </div>
                       )}
                     </div>
@@ -841,16 +778,6 @@ export default function SincronizacionPage() {
                       'Disponible'
                     ) : (
                       <span className="text-destructive">No disponible — se requiere HTTPS</span>
-                    )}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4 py-1 border-b border-border/40">
-                  <dt className="text-muted-foreground">Folios desbloqueados</dt>
-                  <dd className="font-medium">
-                    {folios?.bloqueado ? (
-                      <span className="text-amber-600">No — inicie sesión otra vez</span>
-                    ) : (
-                      'Sí'
                     )}
                   </dd>
                 </div>
@@ -935,7 +862,7 @@ export default function SincronizacionPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Anular esta venta?</AlertDialogTitle>
+            <AlertDialogTitle>¿Anular esta recaudación?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 <p>
@@ -943,7 +870,7 @@ export default function SincronizacionPage() {
                   {moneda(aAnular?.resumen.montoTotal ?? '0')}
                 </p>
                 <p>
-                  La venta <strong>no se subirá al servidor</strong>. Su folio se declarará como no
+                  La recaudación <strong>no se subirá al servidor</strong>. Su folio se declarará como no
                   utilizado al conciliar el lote, con lo que el pase impreso deja de servir para
                   ingresar. En la caja no entra ni sale dinero.
                 </p>
@@ -996,7 +923,7 @@ export default function SincronizacionPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Descartar esta venta del dispositivo?</AlertDialogTitle>
+            <AlertDialogTitle>¿Descartar esta recaudación del dispositivo?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 <p>
@@ -1004,7 +931,7 @@ export default function SincronizacionPage() {
                   {moneda(aDescartar?.resumen.montoTotal ?? '0')}
                 </p>
                 <p>
-                  El servidor rechazó esta venta y no la va a aceptar. Descartarla la borra de este
+                  El servidor rechazó esta recaudación y no la va a aceptar. Descartarla la borra de este
                   dispositivo: el cobro deja de tener respaldo en el sistema y aparecerá como
                   faltante en el arqueo.
                 </p>

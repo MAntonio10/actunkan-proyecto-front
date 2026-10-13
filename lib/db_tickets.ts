@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import type { IdentidadDispositivo } from '@/lib/dispositivo_taquilla'
 import type {
   CatalogosTickets,
   CredencialOffline,
@@ -7,6 +8,7 @@ import type {
   SecretoCifrado,
   TicketBackend,
   VentaPendienteLocal,
+  DescartePendienteLocal,
 } from '@/tipos'
 
 /**
@@ -35,6 +37,24 @@ export interface FolioLocal {
   /** JSON cifrado de `{ firma, qr }`. */
   iv: string
   datos: string
+}
+
+/**
+ * Lo que el dispositivo necesita recordar para vender sin red, ahora que no hay
+ * lote que se lo diga.
+ *
+ * La apertura de caja es el dato crítico: sin lotes, el servidor ya no sabe
+ * contra qué caja está vendiendo esta taquilla, así que se la manda el
+ * dispositivo al subir la cola. Se cachea estando conectado — el "mínimo una
+ * conexión" que hace falta para abrir turno — y por eso no hay apertura de caja
+ * sin red: la regla de una sola caja abierta la garantiza el servidor con una
+ * transacción, y sin red no se puede garantizar.
+ */
+export interface ContextoOffline {
+  clave: 'actual'
+  idAperturaCaja: number
+  idUsuario: number
+  fechaCache: string
 }
 
 /** Estado del lote de folios vigente en este dispositivo. Una sola fila. */
@@ -74,6 +94,9 @@ class BaseTickets extends Dexie {
   guias!: Table<GuiaBackend, number>
   credenciales!: Table<CredencialOffline, string>
   secretos!: Table<SecretoCifrado, string>
+  identidadDispositivo!: Table<IdentidadDispositivo, string>
+  contextoOffline!: Table<ContextoOffline, string>
+  descartesPendientes!: Table<DescartePendienteLocal, string>
 
   constructor() {
     super('actunkan_tickets')
@@ -94,6 +117,25 @@ class BaseTickets extends Dexie {
     // el taquillero no podía asignarle guía a la venta.
     this.version(2).stores({
       guias: 'id, nombre',
+    })
+
+    // v3: identidad de la taquilla — el par de llaves con el que firma sus
+    // propios pases, que reemplaza a los folios pre-firmados. Una sola fila.
+    this.version(3).stores({
+      identidadDispositivo: 'clave',
+    })
+
+    // v4: la caja contra la que se vende. Sin lotes, el dispositivo tiene que
+    // recordarla él: es el "mínimo una conexión" del arranque en frío.
+    this.version(4).stores({
+      contextoOffline: 'clave',
+    })
+
+    // v5: folios que murieron sin llegar a ser ticket y hay que declarar. Sin
+    // esto quedan como folios sin rendir, que es lo que el servidor interpreta
+    // como cobro del que nadie respondió.
+    this.version(5).stores({
+      descartesPendientes: 'numeroTicket, declarado, idLocal',
     })
   }
 }

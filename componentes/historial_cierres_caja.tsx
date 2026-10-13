@@ -4,11 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ClipboardCheck,
   Scale,
+  Banknote,
   TrendingDown,
   TrendingUp,
   RotateCcw,
-  ChevronLeft,
-  ChevronRight,
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -40,13 +39,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { Paginador } from "@/componentes/paginador";
+import { TarjetaEstadistica } from "@/componentes/tarjeta_estadistica";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import {
   type CierreCajaHistorial,
   type MetricasCierres,
 } from "@/tipos";
+import { formatearFechaApi } from "@/lib/fecha_guatemala";
 
-const LIMITE = 50;
+const LIMITE = 20;
 
 interface Props {
   /** Cambia cuando se cierra o reabre una caja, para recargar. */
@@ -67,7 +69,7 @@ function formatearFechaHora(valor?: string): string {
   if (!valor) return "—";
   const fecha = new Date(valor);
   if (isNaN(fecha.getTime())) return "—";
-  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+  return formatearFechaApi(valor);
 }
 
 /** Diferencia con signo y color: negativa es faltante, positiva sobrante. */
@@ -176,75 +178,50 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-primary/20">
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="h-11 w-11 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <ClipboardCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Cierres
-              </p>
-              <p className="text-2xl font-bold text-primary">{metricas?.totalCierres ?? "—"}</p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <TarjetaEstadistica
+          etiqueta="Cierres"
+          valor={metricas?.totalCierres ?? '—'}
+          icono={ClipboardCheck}
+          tono="primary"
+        />
 
-        <Card className="bg-card border-border/50">
-          <CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-              Total contado
-            </p>
-            <p className="text-2xl font-bold text-foreground">
-              {metricas ? moneda(metricas.totalContado) : "—"}
-            </p>
-          </CardContent>
-        </Card>
+        <TarjetaEstadistica
+          etiqueta="Total esperado"
+          valor={metricas ? moneda(metricas.totalEsperado) : '—'}
+          icono={Scale}
+          tono="neutro"
+        />
 
-        <Card className="bg-card border-border/50">
-          <CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-              Total esperado
-            </p>
-            <p className="text-2xl font-bold text-foreground">
-              {metricas ? moneda(metricas.totalEsperado) : "—"}
-            </p>
-          </CardContent>
-        </Card>
+        {/* Lo contado contra lo esperado sí es una razón contra una meta, que es
+            el caso en que un medidor dice algo: cuánto se acercó el arqueo. Se
+            acota a 100 en el propio componente, así que un sobrante no dibuja
+            una barra más larga que el carril. */}
+        <TarjetaEstadistica
+          etiqueta="Total contado"
+          valor={metricas ? moneda(metricas.totalContado) : '—'}
+          icono={Banknote}
+          tono={diferenciaAcum === 0 ? 'positivo' : diferenciaAcum > 0 ? 'info' : 'negativo'}
+          proporcion={
+            metricas && aNumero(metricas.totalEsperado) > 0
+              ? {
+                  parte: aNumero(metricas.totalContado),
+                  total: aNumero(metricas.totalEsperado),
+                }
+              : undefined
+          }
+        />
 
-        <Card
-          className={cn(
-            diferenciaAcum === 0
-              ? "bg-emerald-500/10 border-emerald-500/30"
-              : diferenciaAcum > 0
-                ? "bg-blue-500/10 border-blue-500/30"
-                : "bg-destructive/10 border-destructive/30",
-          )}
-        >
-          <CardContent className="p-4 flex items-center gap-3">
-            <div className="shrink-0">
-              {diferenciaAcum > 0 ? (
-                <TrendingUp className="h-7 w-7 text-blue-500/70" />
-              ) : diferenciaAcum < 0 ? (
-                <TrendingDown className="h-7 w-7 text-destructive/70" />
-              ) : (
-                <Scale className="h-7 w-7 text-emerald-500/70" />
-              )}
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Diferencia acumulada
-              </p>
-              <p className="text-2xl font-bold">
-                {metricas ? <Diferencia valor={metricas.diferenciaAcumulada} /> : "—"}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {diferenciaAcum < 0 ? "Faltante" : diferenciaAcum > 0 ? "Sobrante" : "Cuadrado"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* La diferencia es de signo, no de magnitud: el tono lo lleva el signo
+            y el pie lo nombra, porque faltante y sobrante no se distinguen por
+            color para quien no ve el rojo. */}
+        <TarjetaEstadistica
+          etiqueta="Diferencia acumulada"
+          valor={metricas ? <Diferencia valor={metricas.diferenciaAcumulada} /> : '—'}
+          icono={diferenciaAcum > 0 ? TrendingUp : diferenciaAcum < 0 ? TrendingDown : Scale}
+          tono={diferenciaAcum === 0 ? 'positivo' : diferenciaAcum > 0 ? 'info' : 'negativo'}
+          pie={diferenciaAcum < 0 ? 'Faltante' : diferenciaAcum > 0 ? 'Sobrante' : 'Cuadrado'}
+        />
       </div>
 
       <Card className="bg-card border-border/50">
@@ -337,8 +314,8 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                           key={c.id}
                           className={cn(
                             c.anulado
-                              ? "bg-amber-500/[0.07] border-l-4 border-l-amber-500"
-                              : "hover:bg-muted/20 border-l-4 border-l-transparent",
+                              ? "bg-amber-500/[0.07]"
+                              : "hover:bg-muted/20",
                           )}
                         >
                           <TableCell className="text-xs whitespace-nowrap">
@@ -411,7 +388,7 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                       className={cn(
                         "p-4 rounded-xl border space-y-3 shadow-sm",
                         c.anulado
-                          ? "border-amber-500/40 bg-amber-500/[0.07] border-l-4 border-l-amber-500"
+                          ? "border-amber-500/40 bg-amber-500/[0.07]"
                           : "border-border/60 bg-card",
                       )}
                     >
@@ -476,35 +453,14 @@ export function HistorialCierresCaja({ refrescarToken, onCambio }: Props) {
                 )}
               </div>
 
-              {total > LIMITE && (
-                <div className="flex items-center justify-between pt-2">
-                  <p className="text-xs text-muted-foreground">
-                    Página {pagina} de {totalPaginas} · {total} cierres
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                      disabled={pagina <= 1 || cargando}
-                      className="gap-1 cursor-pointer"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                      disabled={pagina >= totalPaginas || cargando}
-                      className="gap-1 cursor-pointer"
-                    >
-                      Siguiente
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Paginador
+                pagina={pagina}
+                totalPaginas={totalPaginas}
+                total={total}
+                etiqueta="cierres"
+                cargando={cargando}
+                onCambiar={setPagina}
+              />
             </>
           )}
         </CardContent>

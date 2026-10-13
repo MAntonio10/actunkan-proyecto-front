@@ -14,6 +14,7 @@ import {
   User,
   Baby,
   GraduationCap,
+  HeartHandshake,
   Compass,
   IdCard,
   Edit3,
@@ -43,13 +44,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { api, ApiError, esErrorDeRed, hayConexion } from "@/lib/api";
 import { db } from "@/lib/db_tickets";
-import { asegurarFolios, estadoFolios, UMBRAL_AVISO, type EstadoFolios } from "@/lib/folios_offline";
 import {
   emitirSinConexion,
   espejarTicketsEmitidos,
   precargarGuias,
+  guardarContextoDeCaja,
   ErrorEmisionOffline,
 } from "@/lib/emision_offline";
+import { asegurarDispositivoRegistrado, esSinCajaAbierta } from "@/lib/dispositivo_taquilla";
+import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { SelectorGuia } from "./selector_guia";
 
 import {
@@ -65,6 +68,7 @@ const ICONO_TIPO_VISITANTE: Record<string, typeof User> = {
   nino: Baby,
   nino_menor: Baby,
   centro_educativo: GraduationCap,
+  visitante_especial: HeartHandshake,
 };
 // Se indexan por `codigo`, la clave estable del catálogo. 'mariposario' sigue
 // siendo el código en base de datos aunque la atracción se llame ahora
@@ -80,6 +84,21 @@ const COLOR_ATRACCION: Record<string, string> = {
 
 const CODIGO_EXTRANJERO = "extranjero";
 const CODIGO_NINO_MENOR = "nino_menor";
+const CODIGO_VISITANTE_ESPECIAL = "visitante_especial";
+
+/**
+ * Las categorías que entran sin pagar. Son las dos que el backend tiene con
+ * tarifa Q0 y las únicas a las que permite ese precio.
+ *
+ * Comparten una sola fila en el formulario, con un selector de cuál se está
+ * agregando: son excepciones que se usan poco y dos filas más en la lista
+ * principal le quitaban sitio a las que se venden todos los días. Cada una
+ * conserva su propia cantidad — se pueden llevar las dos en el mismo ticket —
+ * y viajan al backend como líneas separadas en `cantidades[]`, una por
+ * categoría, sin nada nuevo en el contrato de emisión.
+ */
+const CODIGOS_GRATUITOS = new Set([CODIGO_NINO_MENOR, CODIGO_VISITANTE_ESPECIAL]);
+const esCodigoGratuito = (codigo: string) => CODIGOS_GRATUITOS.has(codigo);
 const CODIGO_CENTRO_EDUCATIVO = "centro_educativo";
 
 const esquema = z.object({
@@ -123,14 +142,17 @@ export function FormularioVisitanteCompleto({
   onCatalogosCargados,
 }: Props) {
   const [catalogos, setCatalogos] = useState<CatalogosTickets | null>(null);
+  const { usuario } = useAutenticacion();
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
   /** Los catálogos vienen del almacenamiento local: pueden traer tarifas viejas. */
   const [desdeCache, setDesdeCache] = useState(false);
-  const [folios, setFolios] = useState<EstadoFolios | null>(null);
 
   // Selecciones del formulario, todas por id real del catálogo
   const [idAtraccion, setIdAtraccion] = useState<number | null>(null);
+  /** Cuál de las categorías gratuitas suma el contador de su fila. No borra la
+   *  otra: cada una guarda su cantidad y ambas pueden ir en el mismo ticket. */
+  const [codigoGratuitoActivo, setCodigoGratuitoActivo] = useState(CODIGO_NINO_MENOR);
   const [idOrigen, setIdOrigen] = useState<number | null>(null);
   const [idPais, setIdPais] = useState<number | null>(null);
   const [idTipoRecorrido, setIdTipoRecorrido] = useState<number | null>(null);
@@ -202,8 +224,20 @@ export function FormularioVisitanteCompleto({
       // volvería a disparar la carga de catálogos.
       onCatalogosCargadosRef.current?.(res);
 
-      // Valores iniciales: primera opción de cada catálogo
-      setIdAtraccion((prev) => prev ?? res.atracciones[0]?.id ?? null);
+      // Valores iniciales: primera opción de cada catálogo, salvo la atracción.
+      //
+      // La atracción arranca en las Cuevas, que es lo que el taquillero vende la
+      // mayor parte del tiempo. Se busca por `codigo` y no por posición ni por
+      // id: el orden del catálogo lo decide el backend y cambiarlo movería la
+      // opción por defecto sin que nadie lo note. Si el código no estuviera,
+      // cae a la primera como antes.
+      setIdAtraccion(
+        (prev) =>
+          prev ??
+          res.atracciones.find((a) => a.codigo === "cuevas")?.id ??
+          res.atracciones[0]?.id ??
+          null,
+      );
       setIdOrigen((prev) => prev ?? res.origenes[0]?.id ?? null);
       setIdTipoRecorrido((prev) => prev ?? res.tiposRecorrido[0]?.id ?? null);
       const efectivo = res.opcionesPago.find((o) => o.esEfectivo) || res.opcionesPago[0];
@@ -225,21 +259,68 @@ export function FormularioVisitanteCompleto({
     }
   }, []);
 
-  // Inventario de folios pre-firmados: sin ellos no hay venta sin conexión.
-  const refrescarEstadoFolios = useCallback(async () => {
-    try {
-      setFolios(await asegurarFolios());
-    } catch {
-      setFolios(await estadoFolios());
-    }
-  }, []);
 
   useEffect(() => {
-    refrescarEstadoFolios();
     // El catálogo de guías se guarda al entrar, no al abrir el selector: un
     // turno que arranca sin señal debe encontrarlo ya cargado.
     void precargarGuias();
-  }, [refrescarEstadoFolios]);
+  }, []);
+
+  /*
+   * Todo lo que la taquilla necesita tener resuelto ANTES de quedarse sin red.
+   *
+   * Las tres cosas se piden al abrir la pantalla con conexión y las tres fallan
+   * en silencio sin ella, porque sin ella ya es tarde: lo que valga se quedó
+   * guardado de la última vez.
+   *
+   * - El par de llaves con el que este equipo firma sus pases. Idempotente: si
+   *   ya está registrado no hace nada, y si el par se generó pero el alta falló,
+   *   reintenta con la misma llave.
+   * - Contra qué caja se está vendiendo. Sin lotes, el servidor ya no lo sabe;
+   *   se lo dice el dispositivo al subir la cola.
+   */
+  useEffect(() => {
+    if (!usuario) return;
+    let activo = true;
+
+    void (async () => {
+      try {
+        const { caja } = await asegurarDispositivoRegistrado();
+        if (!activo) return;
+        // El id de la caja sale de esta misma respuesta: un segundo viaje a
+        // `GET /cajas/actual` podría fallar justo cuando la red se cae.
+        if (caja) await guardarContextoDeCaja(caja.id, usuario.id);
+      } catch (error: unknown) {
+        if (!activo) return;
+
+        // Caja cerrada: hay que decir qué hacer, no "error al registrar". El
+        // servidor lo rechaza acá y no al sincronizar porque este es el único
+        // momento con red y sin dinero cobrado todavía. No se entra al modo sin
+        // conexión: taquillaFirmaSusPases() queda en false y la emisión sin
+        // red se niega sola.
+        //
+        // Ámbar y no rojo, por el mismo criterio que el aviso de ERROR_INTERNO
+        // en /sincronizacion: no es una falla ni una emergencia, es una
+        // instrucción con un siguiente paso claro. El rojo diría "algo se
+        // rompió" cuando el sistema está haciendo exactamente lo que debe.
+        if (esSinCajaAbierta(error)) {
+          toast.warning(
+            "No cuenta con caja abierta, abra una teniendo conexión a internet para emitir tickets sin conexión a internet.",
+            { duration: 12000 },
+          );
+          return;
+        }
+
+        // Sin red, sin contexto seguro o sin permiso: se sigue con lo que haya
+        // guardado de la última vez. Si nunca llegó a registrarse, la emisión
+        // sin conexión se niega sola.
+      }
+    })();
+
+    return () => {
+      activo = false;
+    };
+  }, [usuario]);
 
   useEffect(() => {
     cargarCatalogos();
@@ -276,7 +357,7 @@ export function FormularioVisitanteCompleto({
   // solo para mostrarle el total al usuario antes de confirmar.
   const precioDe = useCallback(
     (tipo: CatalogoCodificado): number => {
-      if (tipo.codigo === CODIGO_NINO_MENOR) return 0;
+      if (esCodigoGratuito(tipo.codigo)) return 0;
       const tarifa = catalogos?.tarifas.find(
         (t) =>
           t.idAtraccion === idAtraccion &&
@@ -404,10 +485,25 @@ export function FormularioVisitanteCompleto({
     }
   };
 
+  // Las filas gratuitas se sacan de `desgloses` para pintarlas juntas. El
+  // activo es el que apunta el contador; si el código guardado no está en el
+  // catálogo (por ejemplo antes de que exista visitante_especial) cae al
+  // primero, y así la fila nunca queda sin contador.
+  const gratuitos = useMemo(
+    () => calculos.desgloses.filter(({ tipo }) => esCodigoGratuito(tipo.codigo)),
+    [calculos],
+  );
+  const gratuitoActivo =
+    gratuitos.find(({ tipo }) => tipo.codigo === codigoGratuitoActivo) ?? gratuitos[0];
+  const totalGratuitos = gratuitos.reduce((acc, g) => acc + g.cantidad, 0);
+  const IconoGratuitoActivo = gratuitoActivo
+    ? ICONO_TIPO_VISITANTE[gratuitoActivo.tipo.codigo] || User
+    : User;
+
   const entrarModoEdicionPrecios = () => {
     const iniciales: Record<number, string> = {};
     tiposVisitanteVisibles.forEach((t) => {
-      if (t.codigo !== CODIGO_NINO_MENOR) iniciales[t.id] = String(precioDe(t));
+      if (!esCodigoGratuito(t.codigo)) iniciales[t.id] = String(precioDe(t));
     });
     setPreciosEditados(iniciales);
     setPrecioGuiaEditado(String(precioTicketGuia));
@@ -417,7 +513,8 @@ export function FormularioVisitanteCompleto({
   const handleGuardarPrecios = async () => {
     if (!idAtraccion || !idOrigen) return;
 
-    // El backend rechaza precio <= 0 salvo en nino_menor, única categoría gratuita
+    // El backend rechaza precio <= 0 salvo en las categorías gratuitas
+    // (nino_menor y visitante_especial), que no se ofrecen para editar.
     const invalido = Object.values(preciosEditados).some((v) => {
       const n = parseFloat(v);
       return isNaN(n) || n <= 0;
@@ -588,7 +685,6 @@ export function FormularioVisitanteCompleto({
       }
 
       onTicketEmitido?.(respuesta);
-      void refrescarEstadoFolios();
 
       const cantidadTickets = respuesta.tickets.length;
       const descripcion = `${datos.nombre_grupo} · ${atraccionActual?.nombre} · Total Q${parseFloat(
@@ -633,10 +729,11 @@ export function FormularioVisitanteCompleto({
 
       if (err instanceof ErrorEmisionOffline) {
         toast.error(
-          err.codigo === "PAGO_NO_EFECTIVO" ? "Cobro con tarjeta no disponible" : "Sin folios disponibles",
+          err.codigo === "PAGO_NO_EFECTIVO"
+            ? "Cobro con tarjeta no disponible"
+            : "No se puede emitir sin conexión",
           { description: mensaje },
         );
-        void refrescarEstadoFolios();
         return;
       }
 
@@ -741,43 +838,14 @@ export function FormularioVisitanteCompleto({
 
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* Estado del modo sin conexión: folios disponibles y frescura de las
-              tarifas. El taquillero necesita enterarse antes de quedarse en
-              cero, no cuando ya no puede vender. */}
+          {/* Frescura de las tarifas guardadas. Ya no hay inventario de folios
+              del que avisar: la taquilla numera los suyos y no se agota. */}
           {desdeCache && (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
                 Trabajando sin conexión con las tarifas guardadas en este dispositivo. Si un precio
                 cambió mientras tanto, el sistema lo señalará al sincronizar.
-              </span>
-            </div>
-          )}
-
-          {folios?.vencido && folios.disponibles > 0 && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
-              <BadgeAlert className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>
-                El lote de folios venció. Todavía se puede vender con los {folios.disponibles} que
-                quedan, pero conéctese a internet para renovarlo cuanto antes.
-              </span>
-            </div>
-          )}
-
-          {folios && folios.idLote !== null && folios.bajoUmbral && (
-            <div
-              className={cn(
-                "rounded-lg border px-3 py-2 text-xs flex items-start gap-2",
-                folios.disponibles === 0
-                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                  : "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200",
-              )}
-            >
-              <BadgeAlert className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>
-                {folios.disponibles === 0
-                  ? "Sin folios para vender sin conexión. Conéctese a internet para reponerlos."
-                  : `Quedan ${folios.disponibles} folios para venta sin conexión (aviso bajo ${UMBRAL_AVISO}). Conéctese para reponerlos.`}
               </span>
             </div>
           )}
@@ -966,10 +1034,12 @@ export function FormularioVisitanteCompleto({
             </div>
 
             <div className="space-y-2.5">
-              {calculos.desgloses.map(({ tipo, cantidad, precioUnitario, subtotal }) => {
+              {calculos.desgloses
+                .filter(({ tipo }) => !esCodigoGratuito(tipo.codigo))
+                .map(({ tipo, cantidad, precioUnitario, subtotal }) => {
                 const Icono = ICONO_TIPO_VISITANTE[tipo.codigo] || User;
                 const activo = cantidad > 0;
-                const esGratuito = tipo.codigo === CODIGO_NINO_MENOR;
+                const esGratuito = false;
 
                 return (
                   <div
@@ -1024,6 +1094,7 @@ export function FormularioVisitanteCompleto({
                             <span className="text-xs font-semibold text-emerald-500">Q</span>
                             <Input
                               type="number"
+                              inputMode="decimal"
                               min={1}
                               step={1}
                               placeholder="0"
@@ -1082,6 +1153,122 @@ export function FormularioVisitanteCompleto({
                   </div>
                 );
               })}
+
+              {/* Las categorías gratuitas, en una sola fila con selector. Ver
+                  `CODIGOS_GRATUITOS`: el selector elige a cuál suma el contador,
+                  no reemplaza a la otra. */}
+              {gratuitos.length > 0 && gratuitoActivo && (
+                <div
+                  className={cn(
+                    "flex flex-col gap-3 rounded-lg border-2 p-3 transition-all",
+                    totalGratuitos > 0
+                      ? "border-primary/60 bg-primary/5"
+                      : "border-border/50 bg-muted/20",
+                  )}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+                          totalGratuitos > 0
+                            ? "bg-primary/15 text-primary"
+                            : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        <IconoGratuitoActivo className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium leading-tight text-sm sm:text-base flex items-center gap-1.5">
+                          <span>{gratuitoActivo.tipo.nombre}</span>
+                          <span className="text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.2 rounded-full border border-emerald-500/30">
+                            Gratis
+                          </span>
+                        </p>
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                          Ingreso sin costo
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/40">
+                      <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1.5 rounded-md border border-emerald-500/30">
+                        Q0.00 (Gratis)
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-card border border-border/60 rounded-md h-9 px-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-primary hover:bg-primary/10 cursor-pointer"
+                          onClick={() => ajustarCantidad(gratuitoActivo.tipo.id, -1)}
+                          disabled={gratuitoActivo.cantidad <= 0}
+                          aria-label={`Quitar un ${gratuitoActivo.tipo.nombre}`}
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                        <div className="w-8 text-center">
+                          <span className="text-base font-bold tabular-nums">
+                            {gratuitoActivo.cantidad}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-primary hover:bg-primary/10 cursor-pointer"
+                          onClick={() => ajustarCantidad(gratuitoActivo.tipo.id, 1)}
+                          disabled={gratuitoActivo.cantidad >= 100}
+                          aria-label={`Agregar un ${gratuitoActivo.tipo.nombre}`}
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Con una sola categoría gratuita en el catálogo no hay nada
+                      que elegir y el selector no se dibuja. */}
+                  {gratuitos.length > 1 && (
+                    <div
+                      role="group"
+                      aria-label="Categoría gratuita"
+                      className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-2.5"
+                    >
+                      {gratuitos.map(({ tipo, cantidad }) => {
+                        const seleccionada = tipo.codigo === gratuitoActivo.tipo.codigo;
+                        return (
+                          <Button
+                            key={tipo.id}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-pressed={seleccionada}
+                            onClick={() => setCodigoGratuitoActivo(tipo.codigo)}
+                            className={cn(
+                              "h-8 gap-1.5 text-xs cursor-pointer",
+                              seleccionada
+                                ? "border-primary bg-primary/10 text-primary font-semibold"
+                                : "border-border/60 text-muted-foreground",
+                            )}
+                          >
+                            {tipo.nombre}
+                            {/* La cantidad ya agregada de la que NO está
+                                seleccionada es lo que deja ver que las dos
+                                conviven en el mismo ticket. */}
+                            {cantidad > 0 && (
+                              <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-bold text-primary tabular-nums">
+                                {cantidad}
+                              </span>
+                            )}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {errorCantidades && <p className="text-sm text-destructive">{errorCantidades}</p>}
           </div>
@@ -1313,6 +1500,7 @@ export function FormularioVisitanteCompleto({
                       <span className="font-semibold text-emerald-500">Q</span>
                       <Input
                         type="number"
+                        inputMode="decimal"
                         min={1}
                         placeholder="0"
                         value={precioGuiaEditado}
@@ -1351,7 +1539,7 @@ export function FormularioVisitanteCompleto({
               {calculos.desgloses
                 .filter((d) => d.cantidad > 0)
                 .map((d) => {
-                  const esGratuito = d.tipo.codigo === CODIGO_NINO_MENOR;
+                  const esGratuito = esCodigoGratuito(d.tipo.codigo);
                   return (
                     <div key={d.tipo.id} className="flex justify-between text-muted-foreground">
                       <span>

@@ -24,13 +24,13 @@ import {
   RefreshCw,
   Sliders,
   CheckCircle2,
-  XCircle,
   Shield,
   Layers,
   Check,
   X,
   Eye,
   EyeOff,
+  Dices,
 } from 'lucide-react'
 
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
@@ -81,6 +81,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
 import { useAutenticacion, ACCESO_TEMPORAL_DEV } from '@/contexto/contexto_autenticacion'
 import { RutaProtegida } from '@/componentes/ruta_protegida'
+import { Paginador } from '@/componentes/paginador'
+import { TarjetaEstadistica } from '@/componentes/tarjeta_estadistica'
 import {
   UsuarioBackend,
   PuestoBackend,
@@ -88,6 +90,8 @@ import {
   AccionBackend,
   ModuloAccionBackend,
 } from '@/tipos'
+import { formatearFechaApi } from '@/lib/fecha_guatemala'
+import { generarContrasena, hayAzarSeguro, LARGO_CONTRASENA } from '@/lib/generar_contrasena'
 
 // --- ESQUEMAS ZOD ---
 const esquemaCrearUsuario = z.object({
@@ -135,12 +139,72 @@ function obtenerIniciales(nombre: string) {
 
 function formatoFecha(fechaIso?: string) {
   if (!fechaIso) return 'N/A'
-  return new Intl.DateTimeFormat('es-GT', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(fechaIso))
+  return formatearFechaApi(fechaIso, { day: '2-digit', month: 'short', year: 'numeric' })
 }
+
+/**
+ * Qué administra cada módulo.
+ *
+ * Vive acá y no en la base porque el modelo `Modulo` no tiene columna
+ * `descripcion` — la que existe es la de `Puestos` —, así que servirla desde el
+ * backend sería un cambio de esquema para un texto de ayuda de una pantalla. El
+ * día que haga falta editarlas sin tocar código, ahí se discute la columna.
+ *
+ * Las claves son los nombres del backend en minúscula. Un módulo que no esté
+ * acá simplemente no dibuja la línea.
+ */
+const DESCRIPCION_MODULO: Record<string, string> = {
+  emisiontickets:
+    'Emisión de tickets, tarifas, validación de pases por QR y la recaudación sin conexión.',
+  usuarios: 'Usuarios del sistema, sus puestos y los permisos de cada uno.',
+  puestos: 'Puestos de trabajo con los que se agrupa al personal del parque.',
+  cajas: 'Apertura, arqueo y cierre de la caja del turno, y los gastos que salen de ella.',
+  donaciones: 'Donaciones recibidas en la caja, con su recibo.',
+  actividadesparque: 'Publicaciones de actividades del parque y los sectores donde ocurren.',
+  reportes: 'Reportes y gráficas del parque, con descarga en PDF y Excel.',
+  bitacora: 'Registro de auditoría: quién hizo qué y cuándo.',
+}
+
+/**
+ * Qué cubre cada permiso, para la pantalla de asignación.
+ *
+ * El texto de la acción se escribe acá y no sale de la base: la tabla `Accion`
+ * no tiene columna `descripcion` — solo `Modulo` la tiene —. Son a propósito
+ * genéricas: describen el verbo, que significa lo mismo en los siete módulos.
+ */
+const DESCRIPCION_ACCION: Record<string, string> = {
+  ver: 'Consultar y buscar dentro del módulo. Es la base: sin este permiso los demás no se pueden usar.',
+  crear: 'Dar de alta registros nuevos.',
+  editar: 'Modificar registros que ya existen.',
+  anular: 'Dar de baja registros. No los borra: quedan marcados como anulados y siguen en el historial.',
+  exportar: 'Descargar la información en PDF o Excel.',
+}
+
+/**
+ * Los casos donde el verbo genérico se queda corto o directamente engaña. Se
+ * agregan solo con el comportamiento verificado, nunca por intuición: una
+ * descripción equivocada en esta pantalla hace que alguien conceda un permiso
+ * creyendo que da otra cosa.
+ */
+const DESCRIPCION_POR_MODULO: Record<string, Record<string, string>> = {
+  cajas: {
+    editar:
+      'Supervisión de caja: ver el arqueo antes de cerrar, consultar el historial de cierres y anular un cierre para reabrir la caja. No es edición corriente.',
+  },
+  reportes: {
+    ver: 'Abrir el módulo de reportes. Cada reporte exige además el permiso Ver del módulo del que salen sus datos.',
+  },
+}
+
+/** Descripción del permiso módulo + acción, con el caso particular si lo hay. */
+function descripcionPermiso(nombreModulo: string, nombreAccion: string): string {
+  const modulo = nombreModulo.toLowerCase().trim()
+  const accion = nombreAccion.toLowerCase().trim()
+  return DESCRIPCION_POR_MODULO[modulo]?.[accion] ?? DESCRIPCION_ACCION[accion] ?? ''
+}
+
+/** Tamaño de página, igual que en el resto de los listados del sistema. */
+const LIMITE_USUARIOS = 20
 
 export default function ModuloUsuariosHubPage() {
   const { usuario, tienePermiso, tieneAccesoModulo, refrescarUsuario } = useAutenticacion()
@@ -193,6 +257,7 @@ export default function ModuloUsuariosHubPage() {
   const [busquedaUsuario, setBusquedaUsuario] = useState('')
   const [filtroEstadoUsuario, setFiltroEstadoUsuario] = useState<'activos' | 'anulados' | 'todos'>('activos')
   const [filtroPuestoUsuario, setFiltroPuestoUsuario] = useState<string>('todos')
+  const [paginaUsuarios, setPaginaUsuarios] = useState(1)
 
   // --- FILTROS DE PUESTOS ---
   const [busquedaPuesto, setBusquedaPuesto] = useState('')
@@ -353,6 +418,47 @@ export default function ModuloUsuariosHubPage() {
   const formModulo = useForm<FormModulo>({ resolver: zodResolver(esquemaModulo) })
   const formAccion = useForm<FormAccion>({ resolver: zodResolver(esquemaAccion) })
 
+  /**
+   * Genera la contraseña inicial, la deja a la vista y la copia.
+   *
+   * Las tres cosas juntas, y no solo generarla: esta contraseña hay que
+   * transmitirla. El administrador crea la cuenta y le dicta la clave al
+   * taquillero, así que una contraseña generada y oculta no sirve de nada —
+   * quedaría guardada sin que nadie sepa cuál es.
+   *
+   * El portapapeles puede fallar y no es un error: `navigator.clipboard` exige
+   * contexto seguro, y por LAN en `http://` no existe. Ahí la contraseña ya
+   * quedó visible en el campo, que es el camino que de todos modos se usa para
+   * dictarla.
+   */
+  const generarContrasenaInicial = async () => {
+    if (!hayAzarSeguro()) {
+      toast.error('Este navegador no puede generar la contraseña', {
+        description: 'Escríbala a mano. No se genera con un azar débil para salir del paso.',
+      })
+      return
+    }
+
+    const nueva = generarContrasena()
+    // `shouldValidate` limpia el error de largo mínimo si ya estaba en pantalla.
+    formCrearU.setValue('contrasena', nueva, { shouldValidate: true, shouldDirty: true })
+    setMostrarContrasenaCrear(true)
+
+    try {
+      await navigator.clipboard.writeText(nueva)
+      toast.success('Contraseña generada y copiada', {
+        description: 'Anótela ahora: una vez creado el usuario no se puede volver a consultar.',
+        duration: 10000,
+      })
+    } catch {
+      toast.success('Contraseña generada', {
+        description:
+          'No se pudo copiar al portapapeles, así que cópiela del campo. Anótela ahora: después no se puede consultar.',
+        duration: 10000,
+      })
+    }
+  }
+
   // --- USUARIOS FILTRADOS ---
   const usuariosFiltrados = useMemo(() => {
     return usuarios.filter((u) => {
@@ -375,6 +481,39 @@ export default function ModuloUsuariosHubPage() {
       )
     })
   }, [usuarios, filtroEstadoUsuario, filtroPuestoUsuario, busquedaUsuario])
+
+  // --- PAGINACIÓN DE USUARIOS (en el navegador, no en el servidor) ---
+  //
+  // Las demás pantallas piden una página al backend. Esta no: `GET /usuarios`
+  // no tiene parámetro `buscar` -- su DTO solo acepta `incluirAnulados`,
+  // `pagina` y `limite` -- así que pedirle páginas de 20 dejaría el buscador
+  // mirando 20 usuarios en vez de todos, que es lo que hace hoy. Se sigue
+  // trayendo la lista completa (hasta 200, ver la carga) y se recorta acá,
+  // después de filtrar, para que la búsqueda siga alcanzando a todos.
+  //
+  // El día que el parque pase de 200 usuarios habrá que mover búsqueda y
+  // paginación al servidor, y para eso hace falta ese `buscar`.
+  const totalPaginasUsuarios = Math.max(1, Math.ceil(usuariosFiltrados.length / LIMITE_USUARIOS))
+
+  // Se acota al pintar además de reiniciarse al filtrar: anular un usuario puede
+  // sacarlo del filtro activo y dejar la última página sin filas.
+  const paginaUsuariosVigente = Math.min(paginaUsuarios, totalPaginasUsuarios)
+
+  const usuariosPagina = useMemo(
+    () =>
+      usuariosFiltrados.slice(
+        (paginaUsuariosVigente - 1) * LIMITE_USUARIOS,
+        paginaUsuariosVigente * LIMITE_USUARIOS,
+      ),
+    [usuariosFiltrados, paginaUsuariosVigente],
+  )
+
+  // Cambiar un filtro devuelve a la primera página: quedarse en la 3 de un
+  // conjunto nuevo es mirar una lista vacía. Acá no cuesta una petición de más,
+  // porque el recorte es local.
+  useEffect(() => {
+    setPaginaUsuarios(1)
+  }, [busquedaUsuario, filtroEstadoUsuario, filtroPuestoUsuario])
 
   // --- PUESTOS FILTRADOS ---
   const puestosFiltrados = useMemo(() => {
@@ -428,6 +567,7 @@ export default function ModuloUsuariosHubPage() {
       toast.success('Usuario registrado exitosamente', { description: nuevo.nombre })
       setModalCrearUsuarioAbierto(false)
       formCrearU.reset()
+      setMostrarContrasenaCrear(false)
     } catch (err: unknown) {
       toast.error('Error al crear usuario', {
         description: err instanceof Error ? err.message : 'Error inesperado',
@@ -810,82 +950,57 @@ export default function ModuloUsuariosHubPage() {
           >
             {/* TARJETAS ESTADÍSTICAS - Siempre arriba */}
             {pestanaActiva === 'usuarios' && puedeVerUsuarios && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Total Registrados</p>
-                      <p className="text-2xl font-bold mt-1">{statsUsuarios.total}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                      <Users className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Usuarios Activos</p>
-                      <p className="text-2xl font-bold text-emerald-600 mt-1">{statsUsuarios.activos}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-600">
-                      <UserCheck className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Usuarios Anulados</p>
-                      <p className="text-2xl font-bold text-destructive mt-1">{statsUsuarios.anulados}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
-                      <UserX className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {/* El total no lleva medidor: es el entero, no una parte. Los
+                    otros dos sí, porque su cifra es una porción de él.
+                    En móvil se estira a las dos columnas: es la principal. */}
+                <TarjetaEstadistica
+                  className="col-span-2 sm:col-span-1"
+                  etiqueta="Total registrados"
+                  valor={statsUsuarios.total}
+                  icono={Users}
+                  tono="primary"
+                />
+                <TarjetaEstadistica
+                  etiqueta="Usuarios activos"
+                  valor={statsUsuarios.activos}
+                  icono={UserCheck}
+                  tono="positivo"
+                  proporcion={{ parte: statsUsuarios.activos, total: statsUsuarios.total }}
+                />
+                <TarjetaEstadistica
+                  etiqueta="Usuarios anulados"
+                  valor={statsUsuarios.anulados}
+                  icono={UserX}
+                  tono="negativo"
+                  proporcion={{ parte: statsUsuarios.anulados, total: statsUsuarios.total }}
+                />
               </div>
             )}
 
             {pestanaActiva === 'puestos' && puedeVerPuestos && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Total Puestos</p>
-                      <p className="text-2xl font-bold mt-1">{statsPuestos.total}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                      <Briefcase className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Puestos Activos</p>
-                      <p className="text-2xl font-bold text-emerald-600 mt-1">{statsPuestos.activos}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-600">
-                      <CheckCircle2 className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-border/60 bg-card">
-                  <CardContent className="pt-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase font-semibold">Puestos Anulados</p>
-                      <p className="text-2xl font-bold text-destructive mt-1">{statsPuestos.anulados}</p>
-                    </div>
-                    <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
-                      <XCircle className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <TarjetaEstadistica
+                  className="col-span-2 sm:col-span-1"
+                  etiqueta="Total puestos"
+                  valor={statsPuestos.total}
+                  icono={Briefcase}
+                  tono="primary"
+                />
+                <TarjetaEstadistica
+                  etiqueta="Puestos activos"
+                  valor={statsPuestos.activos}
+                  icono={UserCheck}
+                  tono="positivo"
+                  proporcion={{ parte: statsPuestos.activos, total: statsPuestos.total }}
+                />
+                <TarjetaEstadistica
+                  etiqueta="Puestos anulados"
+                  valor={statsPuestos.anulados}
+                  icono={UserX}
+                  tono="negativo"
+                  proporcion={{ parte: statsPuestos.anulados, total: statsPuestos.total }}
+                />
               </div>
             )}
 
@@ -938,6 +1053,9 @@ export default function ModuloUsuariosHubPage() {
                       <Button
                         onClick={() => {
                           formCrearU.reset()
+                          // El campo arranca oculto: "Generar" lo revela, y sin
+                          // esto quedaría revelado para el usuario siguiente.
+                          setMostrarContrasenaCrear(false)
                           setModalCrearUsuarioAbierto(true)
                         }}
                         className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
@@ -1022,7 +1140,7 @@ export default function ModuloUsuariosHubPage() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-                      {usuariosFiltrados.map((u) => (
+                      {usuariosPagina.map((u) => (
                         <Card
                           key={u.id}
                           className={`transition-all hover:shadow-md border-border/60 ${
@@ -1060,7 +1178,7 @@ export default function ModuloUsuariosHubPage() {
                               {(puedeEditarUsuarios || puedeAnularUsuarios) && (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <Button variant="ghost" size="icon" className="h-11 w-11 sm:h-8 sm:w-8">
                                       <MoreVertical className="h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
@@ -1146,6 +1264,15 @@ export default function ModuloUsuariosHubPage() {
                       ))}
                     </div>
                   )}
+
+                  <Paginador
+                    pagina={paginaUsuariosVigente}
+                    totalPaginas={totalPaginasUsuarios}
+                    total={usuariosFiltrados.length}
+                    etiqueta="usuarios"
+                    cargando={cargandoDatos}
+                    onCambiar={setPaginaUsuarios}
+                  />
                 </CardContent>
               </Card>
             </TabsContent>
@@ -1239,7 +1366,7 @@ export default function ModuloUsuariosHubPage() {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => handleAbrirEditarPuesto(p)}
-                                  className="h-8 w-8 text-blue-500"
+                                  className="h-11 w-11 sm:h-8 sm:w-8 text-blue-500"
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
@@ -1251,7 +1378,7 @@ export default function ModuloUsuariosHubPage() {
                                     size="icon"
                                     onClick={() => handleActivarPuesto(p)}
                                     title="Reactivar puesto"
-                                    className="h-8 w-8 text-emerald-600 hover:text-emerald-700"
+                                    className="h-11 w-11 sm:h-8 sm:w-8 text-emerald-600 hover:text-emerald-700"
                                   >
                                     <CheckCircle2 className="h-4 w-4" />
                                   </Button>
@@ -1263,7 +1390,7 @@ export default function ModuloUsuariosHubPage() {
                                     size="icon"
                                     onClick={() => setPuestoAnular(p)}
                                     title="Anular puesto"
-                                    className="h-8 w-8 text-destructive"
+                                    className="h-11 w-11 sm:h-8 sm:w-8 text-destructive"
                                   >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
@@ -1329,7 +1456,19 @@ export default function ModuloUsuariosHubPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="contrasena">Contraseña Inicial</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="contrasena">Contraseña Inicial</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={generarContrasenaInicial}
+                  className="h-8 gap-1.5 px-2 text-xs text-primary hover:text-primary cursor-pointer"
+                >
+                  <Dices className="h-3.5 w-3.5" />
+                  Generar
+                </Button>
+              </div>
               <div className="relative">
                 <Input
                   id="contrasena"
@@ -1354,6 +1493,11 @@ export default function ModuloUsuariosHubPage() {
               {formCrearU.formState.errors.contrasena && (
                 <p className="text-xs text-destructive">{formCrearU.formState.errors.contrasena.message}</p>
               )}
+              <p className="text-[11px] text-muted-foreground">
+                «Generar» crea una de {LARGO_CONTRASENA} caracteres sin letras ni números que se
+                confundan al dictarla, la muestra y la copia. Anótela antes de cerrar: después no
+                se puede volver a consultar.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -1525,14 +1669,21 @@ export default function ModuloUsuariosHubPage() {
 
                       return (
                         <div key={mod.id} className="rounded-lg border border-border/60 bg-card p-3 space-y-3">
-                          <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                            <div className="flex items-center gap-2">
-                              <Shield className="h-4 w-4 text-primary" />
-                              <span className="font-semibold text-sm capitalize">{mod.nombre}</span>
-                              {asociacionesModulo.length > 0 && (
-                                <Badge variant="outline" className="text-[10px] font-mono">
-                                  {cantidadSeleccionados} / {asociacionesModulo.length}
-                                </Badge>
+                          <div className="flex items-start justify-between gap-3 border-b border-border/40 pb-2">
+                            <div className="flex flex-col gap-0.5 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Shield className="h-4 w-4 text-primary shrink-0" />
+                                <span className="font-semibold text-sm capitalize">{mod.nombre}</span>
+                                {asociacionesModulo.length > 0 && (
+                                  <Badge variant="outline" className="text-[10px] font-mono">
+                                    {cantidadSeleccionados} / {asociacionesModulo.length}
+                                  </Badge>
+                                )}
+                              </div>
+                              {DESCRIPCION_MODULO[mod.nombre?.toLowerCase().trim()] && (
+                                <span className="text-[11px] leading-snug text-muted-foreground pl-6">
+                                  {DESCRIPCION_MODULO[mod.nombre.toLowerCase().trim()]}
+                                </span>
                               )}
                             </div>
 
@@ -1567,19 +1718,24 @@ export default function ModuloUsuariosHubPage() {
                                 return (
                                   <div
                                     key={ma.id}
-                                    className={`flex items-center justify-between p-2.5 rounded-md border text-xs transition-colors ${
+                                    className={`flex items-start justify-between gap-3 p-2.5 rounded-md border text-xs transition-colors ${
                                       isChecked
                                         ? 'bg-primary/10 border-primary/40 font-medium text-foreground'
                                         : 'bg-muted/30 border-border/60 text-muted-foreground hover:bg-muted/50'
                                     }`}
                                   >
-                                    <div className="flex items-center gap-2">
-                                      <span className="capitalize">{nombreAccion}</span>
-                                      {esVer && (
-                                        <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">
-                                          Requerido
-                                        </Badge>
-                                      )}
+                                    <div className="flex flex-col gap-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="capitalize">{nombreAccion}</span>
+                                        {esVer && (
+                                          <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">
+                                            Requerido
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <span className="text-[11px] leading-snug font-normal text-muted-foreground">
+                                        {descripcionPermiso(mod.nombre, nombreAccion)}
+                                      </span>
                                     </div>
                                     <Switch
                                       checked={isChecked}

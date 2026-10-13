@@ -12,8 +12,6 @@ import {
   Mountain,
   BookOpen,
   Calendar,
-  ChevronLeft,
-  ChevronRight,
   Eye,
   FileText,
   Ban,
@@ -79,6 +77,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { api, esErrorDeRed } from "@/lib/api";
+import { Paginador } from "@/componentes/paginador";
+import { TarjetaEstadistica } from '@/componentes/tarjeta_estadistica';
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { usePdfTicket } from "@/hooks/use_pdf_ticket";
 import {
@@ -96,8 +96,9 @@ import {
   type MetricasTickets,
   type RespuestaPagoTicket,
 } from "@/tipos";
+import { diaDeFechaApi, fechaIsoEnGuatemala, formatearFechaApi, formatearInstante } from "@/lib/fecha_guatemala";
 
-const LIMITE_POR_PAGINA = 50;
+const LIMITE_POR_PAGINA = 20;
 const TODOS = "todos";
 
 /** Un ticket local no existe en el backend: no tiene PDF ni se puede anular. */
@@ -147,18 +148,25 @@ interface Props {
   refrescarToken?: number;
 }
 
-function formatearFecha(valor?: string): string {
+/**
+ * Acá se cruzan las dos convenciones de fecha del sistema, y se leen al revés.
+ *
+ * Una fila de la API trae la hora de pared de Guatemala con una `Z` que miente,
+ * así que se lee **sin** convertir de zona. Una fila local la escribió Dexie con
+ * `new Date()`, que sí es un instante real, y esa se convierte a la zona del
+ * parque. Tratarlas igual deja la mitad de la tabla corrida seis horas — y son
+ * justamente las filas locales las que el taquillero contrasta contra su propia
+ * memoria de la venta. Ver `lib/fecha_guatemala.ts`.
+ */
+function formatearFecha(valor: string | undefined, local: boolean): string {
   if (!valor) return "—";
+  if (!local) return diaDeFechaApi(valor);
   const fecha = new Date(valor);
-  if (isNaN(fecha.getTime())) return "—";
-  return fecha.toISOString().split("T")[0];
+  return isNaN(fecha.getTime()) ? "—" : fechaIsoEnGuatemala(fecha);
 }
 
-function formatearFechaHora(valor?: string | null): string {
-  if (!valor) return "—";
-  const fecha = new Date(valor);
-  if (isNaN(fecha.getTime())) return "—";
-  return fecha.toLocaleString("es-GT", { dateStyle: "medium", timeStyle: "short" });
+function formatearFechaHora(valor: string | null | undefined, local: boolean): string {
+  return local ? formatearInstante(valor) : formatearFechaApi(valor);
 }
 
 /** Fila etiqueta/valor del detalle compacto. */
@@ -589,62 +597,45 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
       </div>
 
       {/* Métricas calculadas por el servidor sobre el filtro completo, no solo la página */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-card border-primary/20">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0">
-              <Ticket className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Tickets Emitidos
-              </p>
-              <p className="text-2xl font-bold text-primary">
-                {metricas?.totalTickets ?? "—"}
-              </p>
-              {/* Las métricas las calcula el servidor y no incluyen lo que
-                  todavía no subió. Se suma aparte en vez de alterar el número:
-                  inflarlo lo volvería imposible de cuadrar contra el backend. */}
-              {ticketsLocales.length > 0 && (
-                <p className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-                  +{ticketsLocales.length} sin sincronizar
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {/* El `pie` dice lo que falta subir en vez de sumarlo al número: las
+            métricas las calcula el servidor y no incluyen lo pendiente, así que
+            inflar la cifra la volvería imposible de cuadrar contra el backend. */}
+        <TarjetaEstadistica
+          className="col-span-2 md:col-span-1"
+          etiqueta="Tickets emitidos"
+          valor={metricas?.totalTickets ?? '—'}
+          icono={Ticket}
+          tono="primary"
+          pie={ticketsLocales.length > 0 ? `+${ticketsLocales.length} sin sincronizar` : undefined}
+        />
 
-        <Card className="bg-card border-border/50">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-blue-500/15 text-blue-500 flex items-center justify-center shrink-0">
-              <Users className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Total Personas Ingresadas
-              </p>
-              <p className="text-2xl font-bold text-foreground">
-                {metricas ? `${metricas.totalPersonas} Pax` : "—"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Tickets, personas y quetzales son unidades distintas: entre ellas no
+            hay porcentaje que dibujar. La media de personas por ticket sí es un
+            dato que se lee de un vistazo, y va como pie. */}
+        <TarjetaEstadistica
+          etiqueta="Personas ingresadas"
+          valor={metricas ? `${metricas.totalPersonas} Pax` : '—'}
+          icono={Users}
+          tono="info"
+          pie={
+            metricas && metricas.totalTickets > 0
+              ? `${(metricas.totalPersonas / metricas.totalTickets).toFixed(1)} por ticket`
+              : undefined
+          }
+        />
 
-        <Card className="bg-card border-border/50">
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center shrink-0">
-              <Banknote className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                Monto Recaudado
-              </p>
-              <p className="text-2xl font-bold text-foreground">
-                {metricas ? `Q${parseFloat(metricas.montoRecaudado).toFixed(2)}` : "—"}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <TarjetaEstadistica
+          etiqueta="Monto recaudado"
+          valor={metricas ? `Q${parseFloat(metricas.montoRecaudado).toFixed(2)}` : '—'}
+          icono={Banknote}
+          tono="positivo"
+          pie={
+            metricas && metricas.totalTickets > 0
+              ? `Q${(parseFloat(metricas.montoRecaudado) / metricas.totalTickets).toFixed(2)} por ticket`
+              : undefined
+          }
+        />
       </div>
 
       <Card className="bg-card border-border/50">
@@ -677,7 +668,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                 setPagina(1);
               }}
             >
-              <SelectTrigger className="w-[150px] h-9 text-xs bg-muted/40 border-border/60">
+              <SelectTrigger className="w-full sm:w-[150px] h-9 text-xs bg-muted/40 border-border/60">
                 <SelectValue placeholder="Atracción" />
               </SelectTrigger>
               <SelectContent>
@@ -697,7 +688,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                 setPagina(1);
               }}
             >
-              <SelectTrigger className="w-[130px] h-9 text-xs bg-muted/40 border-border/60">
+              <SelectTrigger className="w-full sm:w-[130px] h-9 text-xs bg-muted/40 border-border/60">
                 <SelectValue placeholder="Forma de pago" />
               </SelectTrigger>
               <SelectContent>
@@ -718,7 +709,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                 setPagina(1);
               }}
             >
-              <SelectTrigger className="w-[140px] h-9 text-xs bg-muted/40 border-border/60">
+              <SelectTrigger className="w-full sm:w-[140px] h-9 text-xs bg-muted/40 border-border/60">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
@@ -737,8 +728,8 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
               <CloudOff className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
-                Sin conexión con el servidor. Solo se muestran las ventas hechas en este dispositivo
-                que aún no se han subido; el historial completo requiere internet.
+                Sin conexión con el servidor. Solo se muestra la recaudación hecha en este
+                dispositivo que aún no se ha subido; el historial completo requiere internet.
               </span>
             </div>
           )}
@@ -748,7 +739,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
               <CloudOff className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
                 Las filas marcadas <strong>SIN SUBIR</strong> existen solo en este dispositivo: no
-                tienen PDF ni se pueden anular hasta que la venta llegue al servidor. Las marcadas{" "}
+                tienen PDF ni se pueden anular hasta que la recaudación llegue al servidor. Las marcadas{" "}
                 <strong>RECHAZADA</strong> ya se cobraron y el servidor no las aceptó; hay que
                 resolverlas a mano o la caja no cuadra.
               </span>
@@ -763,20 +754,20 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           ) : (
             <>
               {/* Vista Escritorio */}
-              <div className="hidden md:block rounded-md border border-border/50 overflow-hidden">
-                <Table>
+              <div className="hidden lg:block rounded-md border border-border/50 overflow-hidden">
+                <Table className="table-fixed">
                   <TableHeader className="bg-muted/40">
                     <TableRow>
-                      <TableHead className="w-[150px]">No. Ticket</TableHead>
-                      <TableHead>Visitante / Grupo</TableHead>
-                      <TableHead>Atracción</TableHead>
-                      <TableHead>Origen</TableHead>
-                      <TableHead className="text-center">Personas</TableHead>
-                      <TableHead className="text-right">Monto</TableHead>
-                      <TableHead>Forma de Pago</TableHead>
-                      <TableHead>Guía</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead className="w-[60px] text-right">Acciones</TableHead>
+                      <TableHead className="w-[14%]">No. Ticket</TableHead>
+                      <TableHead className="w-[15%]">Visitante / Grupo</TableHead>
+                      <TableHead className="hidden xl:table-cell w-[10%]">Atracción</TableHead>
+                      <TableHead className="hidden 2xl:table-cell w-[10%]">Origen</TableHead>
+                      <TableHead className="w-[7%] text-center">Personas</TableHead>
+                      <TableHead className="w-[8%] text-right">Monto</TableHead>
+                      <TableHead className="hidden 2xl:table-cell w-[11%]">Forma de Pago</TableHead>
+                      <TableHead className="hidden xl:table-cell w-[10%]">Guía</TableHead>
+                      <TableHead className="w-[9%]">Fecha</TableHead>
+                      <TableHead className="w-[6%] text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -819,11 +810,11 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                               </div>
                             </TableCell>
                             <TableCell className="font-medium text-foreground">
-                              <div className="flex items-center gap-2">
+                              <div className="flex min-w-0 items-center gap-2">
                                 {t.tipoTicket === "GUIA" && (
                                   <Compass className="h-4 w-4 text-amber-500 shrink-0" />
                                 )}
-                                <span>{t.nombre || t.guia?.nombre || "—"}</span>
+                                <span className="truncate">{t.nombre || t.guia?.nombre || "—"}</span>
                                 {t.tipoTicket === "GUIA" && (
                                   <Badge
                                     variant="outline"
@@ -834,7 +825,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden xl:table-cell">
                               {t.atraccion && (
                                 <Badge
                                   variant="outline"
@@ -853,7 +844,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell className="text-xs text-muted-foreground font-medium">
+                            <TableCell className="hidden 2xl:table-cell text-xs text-muted-foreground font-medium">
                               {t.origen?.nombre || "—"}
                               {t.pais ? ` · ${t.pais.nombre}` : ""}
                             </TableCell>
@@ -863,7 +854,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                             <TableCell className="text-right font-bold text-foreground">
                               Q{parseFloat(t.montoTotal).toFixed(2)}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="hidden 2xl:table-cell">
                               <div className="flex flex-col gap-1 items-start">
                                 {pago && (
                                   <Badge
@@ -909,14 +900,14 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-xs">
+                            <TableCell className="hidden xl:table-cell text-xs">
                               {/* El objeto `guia` viene poblado tanto en el
                                   ticket del visitante como en el del guía. */}
                               {t.guia ? (
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-foreground flex items-center gap-1">
+                                <div className="flex min-w-0 flex-col">
+                                  <span className="flex min-w-0 items-center gap-1 font-semibold text-foreground">
                                     <Compass className="h-3 w-3 text-primary shrink-0" />
-                                    {t.guia.nombre}
+                                    <span className="truncate">{t.guia.nombre}</span>
                                   </span>
                                   <span className="text-[10px] text-muted-foreground">
                                     {t.guia.tieneCarnet ? "Acreditado" : "Sin carnet"}
@@ -926,10 +917,10 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 <span className="text-muted-foreground italic">Sin guía</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                            <TableCell className="text-xs text-muted-foreground">
                               <div className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
-                                <span>{formatearFecha(t.fechaCreacion)}</span>
+                                <span>{formatearFecha(t.fechaCreacion, esLocal(t))}</span>
                               </div>
                             </TableCell>
                             <TableCell className="text-right">
@@ -951,7 +942,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
               </div>
 
               {/* Vista Móvil */}
-              <div className="grid grid-cols-1 gap-3 md:hidden">
+              <div className="grid grid-cols-1 gap-3 lg:hidden">
                 {ticketsFiltrados.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg p-4 border border-border/50 text-sm">
                     No se encontraron tickets que coincidan con los filtros aplicados.
@@ -1085,7 +1076,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <Calendar className="h-3.5 w-3.5" />
-                            <span>{formatearFecha(t.fechaCreacion)}</span>
+                            <span>{formatearFecha(t.fechaCreacion, esLocal(t))}</span>
                           </div>
                         </div>
 
@@ -1134,35 +1125,14 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
               </div>
 
               {/* Paginación */}
-              {total > LIMITE_POR_PAGINA && (
-                <div className="flex items-center justify-between pt-2">
-                  <p className="text-xs text-muted-foreground">
-                    Página {pagina} de {totalPaginas} · {total} tickets
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.max(1, p - 1))}
-                      disabled={pagina <= 1}
-                      className="gap-1 cursor-pointer"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                      disabled={pagina >= totalPaginas}
-                      className="gap-1 cursor-pointer"
-                    >
-                      Siguiente
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Paginador
+                pagina={pagina}
+                totalPaginas={totalPaginas}
+                total={total}
+                etiqueta="tickets"
+                cargando={cargando}
+                onCambiar={setPagina}
+              />
             </>
           )}
         </CardContent>
@@ -1218,16 +1188,16 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                       )}
                       <span>
                         {ticketDetalle.estadoSincronizacion === "rechazada"
-                          ? "Venta rechazada por el servidor"
-                          : "Venta emitida sin conexión"}
+                          ? "Recaudación rechazada por el servidor"
+                          : "Recaudación emitida sin conexión"}
                       </span>
                     </div>
                     <p className="leading-relaxed">
                       {ticketDetalle.estadoSincronizacion === "rechazada"
-                        ? `El cobro ya se hizo pero el servidor no aceptó la venta${
+                        ? `El cobro ya se hizo pero el servidor no aceptó la recaudación${
                             ticketDetalle.motivoRechazo ? `: ${ticketDetalle.motivoRechazo}` : "."
                           } Debe resolverse a mano o el arqueo de caja no cuadra.`
-                        : "Este ticket todavía no llegó al servidor. El código QR ya es válido para el ingreso; el PDF y la anulación estarán disponibles cuando la venta suba."}
+                        : "Este ticket todavía no llegó al servidor. El código QR ya es válido para el ingreso; el PDF y la anulación estarán disponibles cuando la recaudación suba."}
                     </p>
                   </div>
                 )}
@@ -1275,11 +1245,11 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                     <Dato etiqueta="Emitido por">{ticketDetalle.usuario.nombre}</Dato>
                   )}
                   <Dato etiqueta="Emitido">
-                    {formatearFechaHora(ticketDetalle.fechaCreacion)}
+                    {formatearFechaHora(ticketDetalle.fechaCreacion, esLocal(ticketDetalle))}
                   </Dato>
                   <Dato etiqueta="Uso">
                     {ticketDetalle.fechaUso ? (
-                      formatearFechaHora(ticketDetalle.fechaUso)
+                      formatearFechaHora(ticketDetalle.fechaUso, esLocal(ticketDetalle))
                     ) : (
                       <span className="text-muted-foreground">Sin usar</span>
                     )}
