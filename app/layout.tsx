@@ -14,24 +14,19 @@ export const metadata: Metadata = {
   title: "Parque Regional Municipal Actún Kan - Sistema de Tickets",
   description:
     "Sistema de gestión de tickets y visitantes del Parque Regional Municipal Actún Kan",
-  generator: "v0.app",
   manifest: "/manifest.json",
+  // Ícono de ProPetén en la pestaña, generado desde public/Propeten.png.
   icons: {
     icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
+      { url: "/icon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
     ],
     apple: "/apple-icon.png",
+  },
+  // La interfaz ya está en español: la traducción automática del navegador
+  // reescribe el DOM por debajo de React y rompe la página.
+  other: {
+    google: "notranslate",
   },
 };
 
@@ -49,7 +44,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
+    <html lang="es" translate="no" className="notranslate">
       <body className="font-sans antialiased min-h-screen bg-background">
         <ProveedorAutenticacion>
           {children}

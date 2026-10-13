@@ -14,7 +14,7 @@
  * explícito y está fechado.
  */
 
-const VERSION = 'actunkan-v8'
+const VERSION = 'actunkan-v9'
 const CACHE_SHELL = `${VERSION}-shell`
 const CACHE_ESTATICOS = `${VERSION}-estaticos`
 const PAGINA_SIN_CONEXION = '/sin-conexion.html'
@@ -48,7 +48,7 @@ const OTROS_RECURSOS = [
   // El fondo del sistema. Sin el, las pantallas sin conexion se ven con un
   // hueco de color plano donde el resto de la aplicacion tiene el mapa.
   '/fondo-sistema-1920.webp',
-  '/icon.svg',
+  '/icon-32x32.png',
   '/icon-192x192.png',
   '/icon-512x512.png',
 ]
