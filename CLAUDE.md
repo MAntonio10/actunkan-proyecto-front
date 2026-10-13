@@ -31,7 +31,7 @@ Don't assume a module is mocked or connected — check whether it imports from `
 
 There are no tests in the repo. `next.config.mjs` sets `typescript.ignoreBuildErrors: true`, so `npm run build` will succeed even with type errors — type-check explicitly with `npx tsc --noEmit` when validating changes.
 
-Both `package-lock.json` and `pnpm-lock.yaml` exist; the project currently builds with npm (lockfile is recent). Don't edit both — pick the one already being maintained for the change you're making.
+The project uses npm: `package-lock.json` is the only lockfile (the Dockerfile runs `npm ci`). Install dependencies with npm, not pnpm or yarn.
 
 ## Architecture
 
