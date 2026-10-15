@@ -1397,13 +1397,15 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                               Copiar
                             </Button>
                           </div>
-                          <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          {/* Una sola fila también en móvil: los tres se reparten el ancho, y
+                              sin íconos ni textos largos porque a 360 px no caben. */}
+                          <div className="flex items-center gap-1.5 sm:gap-2 pt-1">
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
                               asChild
-                              className="h-7 text-[11px] font-medium gap-1 text-[#128C7E] dark:text-[#25D366] cursor-pointer"
+                              className="h-7 flex-1 sm:flex-none px-1.5 sm:px-2 text-[11px] font-medium gap-1 text-[#128C7E] dark:text-[#25D366] cursor-pointer"
                             >
                               <a
                                 href={`https://wa.me/?text=${encodeURIComponent(
@@ -1412,7 +1414,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                <Send className="h-3 w-3" />
+                                <Send className="hidden sm:block h-3 w-3" />
                                 WhatsApp
                               </a>
                             </Button>
@@ -1421,15 +1423,15 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                               size="sm"
                               variant="outline"
                               asChild
-                              className="h-7 text-[11px] font-medium gap-1 cursor-pointer"
+                              className="h-7 flex-1 sm:flex-none px-1.5 sm:px-2 text-[11px] font-medium gap-1 cursor-pointer"
                             >
                               <a
                                 href={urlCheckout}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                <ExternalLink className="h-3 w-3" />
-                                Abrir enlace
+                                <ExternalLink className="hidden sm:block h-3 w-3" />
+                                Abrir<span className="hidden sm:inline"> enlace</span>
                               </a>
                             </Button>
                             <Button
@@ -1438,10 +1440,10 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                               variant="outline"
                               onClick={() => consultarEstadoPago(ticketDetalle.id)}
                               disabled={consultandoPago}
-                              className="h-7 text-[11px] font-medium gap-1 cursor-pointer ml-auto"
+                              className="h-7 flex-1 sm:flex-none sm:ml-auto px-1.5 sm:px-2 text-[11px] font-medium gap-1 cursor-pointer"
                             >
-                              {consultandoPago ? <Spinner className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
-                              Consultar estado
+                              {consultandoPago ? <Spinner className="h-3 w-3" /> : <RefreshCw className="hidden sm:block h-3 w-3" />}
+                              Consultar<span className="hidden sm:inline"> estado</span>
                             </Button>
                           </div>
                         </div>
