@@ -14,6 +14,7 @@ import {
   Calendar,
   Eye,
   FileText,
+  Printer,
   Ban,
   MoreVertical,
   Clock,
@@ -81,6 +82,7 @@ import { Paginador } from "@/componentes/paginador";
 import { TarjetaEstadistica } from '@/componentes/tarjeta_estadistica';
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { usePdfTicket } from "@/hooks/use_pdf_ticket";
+import { PaseImprimible } from "@/componentes/pase_imprimible";
 import {
   extraerCheckoutUrl,
   esPagoPendiente,
@@ -219,10 +221,14 @@ function AccionesTicket({
           <Eye className="mr-2 h-4 w-4 text-blue-500" />
           Ver detalle
         </DropdownMenuItem>
-        {!local && (
+        {!(local && ticket.anulado) && (
           <DropdownMenuItem onClick={() => onPdf(ticket)} className="cursor-pointer">
-            <FileText className="mr-2 h-4 w-4 text-primary" />
-            Ver PDF del pase
+            {local ? (
+              <Printer className="mr-2 h-4 w-4 text-primary" />
+            ) : (
+              <FileText className="mr-2 h-4 w-4 text-primary" />
+            )}
+            {local ? "Imprimir pase" : "Ver PDF del pase"}
           </DropdownMenuItem>
         )}
 
@@ -286,6 +292,42 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
   const { puedeAccion } = useAutenticacion();
   const puedeAnular = puedeAccion("EmisionTickets", "Anular");
   const { abrirPdf, pdfEnCursoId } = usePdfTicket();
+
+  // Una venta sin subir no tiene PDF en el servidor: su pase se imprime acá,
+  // con la misma vista que usa la emisión.
+  const [ticketsAImprimir, setTicketsAImprimir] = useState<TicketBackend[]>([]);
+  const contenedorImpresion = useRef<HTMLDivElement>(null);
+  const abrirPase = (t: TicketBackend) => (esLocal(t) ? setTicketsAImprimir([t]) : abrirPdf(t));
+
+  useEffect(() => {
+    if (ticketsAImprimir.length === 0) return;
+    // Oculta el pase de la emisión en curso, que comparte la misma página.
+    document.body.dataset.imprimir = "historial";
+    const terminar = () => {
+      delete document.body.dataset.imprimir;
+      setTicketsAImprimir([]);
+    };
+    window.addEventListener("afterprint", terminar, { once: true });
+    // El QR llega por import dinámico y los logos son diferidos: imprimir antes
+    // de que estén deja huecos en el papel. Tope de 3 s por si alguno no llega.
+    let intentos = 0;
+    const espera = setInterval(() => {
+      const el = contenedorImpresion.current;
+      el?.querySelectorAll("img").forEach((img) => (img.loading = "eager"));
+      const listo =
+        el !== null &&
+        el.querySelectorAll(".pase-qr svg").length >= ticketsAImprimir.length &&
+        Array.from(el.querySelectorAll("img")).every((img) => img.complete);
+      if (listo || ++intentos > 30) {
+        clearInterval(espera);
+        window.print();
+      }
+    }, 100);
+    return () => {
+      clearInterval(espera);
+      window.removeEventListener("afterprint", terminar);
+    };
+  }, [ticketsAImprimir]);
 
   // Detalle / impresión / anulación
   const [ticketDetalle, setTicketDetalle] = useState<TicketBackend | null>(null);
@@ -929,7 +971,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                                 puedeAnular={puedeAnular}
                                 anulando={anulandoId === t.id}
                                 onVer={abrirDetalle}
-                                onPdf={abrirPdf}
+                                onPdf={abrirPase}
                                 onAnular={setTicketAAnular}
                               />
                             </TableCell>
@@ -1090,15 +1132,19 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                             <Eye className="h-3.5 w-3.5" />
                             Ver
                           </Button>
-                          {!esLocal(t) && (
+                          {!(esLocal(t) && t.anulado) && (
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => abrirPdf(t)}
+                              onClick={() => abrirPase(t)}
                               className="flex-1 gap-1.5 h-9 text-xs cursor-pointer"
                             >
-                              <FileText className="h-3.5 w-3.5" />
-                              PDF
+                              {esLocal(t) ? (
+                                <Printer className="h-3.5 w-3.5" />
+                              ) : (
+                                <FileText className="h-3.5 w-3.5" />
+                              )}
+                              {esLocal(t) ? "Imprimir" : "PDF"}
                             </Button>
                           )}
                           {!esLocal(t) && puedeAnular && !t.anulado && (
@@ -1300,7 +1346,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                         El visitante aún no ha completado el pago en la pasarela. Este ticket no autoriza el ingreso en puerta.
                       </p>
                       <div className="p-2 bg-amber-500/15 rounded-lg border border-amber-500/30 text-[11px] font-medium text-amber-950 dark:text-amber-100">
-                        💡 <strong>Recomendación:</strong> Si el cliente nunca paga, anula este ticket para liberar el correlativo y no afectar el arqueo de caja.
+                        <strong>Recomendación:</strong> Si el cliente nunca paga, anula este ticket para liberar el correlativo y no afectar el arqueo de caja.
                       </div>
                     </div>
 
@@ -1429,18 +1475,20 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                     </div>
                   )}
 
-                {!esLocal(ticketDetalle) && (
+                {!(esLocal(ticketDetalle) && ticketDetalle.anulado) && (
                   <Button
-                    onClick={() => abrirPdf(ticketDetalle)}
+                    onClick={() => abrirPase(ticketDetalle)}
                     disabled={pdfEnCursoId === ticketDetalle.id}
                     className="w-full gap-2 cursor-pointer"
                   >
                     {pdfEnCursoId === ticketDetalle.id ? (
                       <Spinner className="h-4 w-4" />
+                    ) : esLocal(ticketDetalle) ? (
+                      <Printer className="h-4 w-4" />
                     ) : (
                       <FileText className="h-4 w-4" />
                     )}
-                    Ver PDF del pase
+                    {esLocal(ticketDetalle) ? "Imprimir pase" : "Ver PDF del pase"}
                   </Button>
                 )}
               </div>
@@ -1484,6 +1532,15 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Invisible en pantalla; solo existe mientras se imprime un pase offline. */}
+      <div ref={contenedorImpresion} className="pase-historial">
+        <PaseImprimible
+          ticketsEmitidos={ticketsAImprimir}
+          // La fecha de una venta local es un instante real del navegador.
+          fecha={ticketsAImprimir[0]?.fechaCreacion ? new Date(ticketsAImprimir[0].fechaCreacion) : new Date()}
+        />
+      </div>
     </div>
   );
 }

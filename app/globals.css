@@ -403,6 +403,13 @@
   .pase-imprimible * {
     visibility: visible;
   }
+  /* Al imprimir desde el historial, el pase de la emisión en curso no sale. */
+  body[data-imprimir="historial"] .pase-imprimible {
+    display: none;
+  }
+  body[data-imprimir="historial"] .pase-historial .pase-imprimible {
+    display: block;
+  }
 
   /* El fondo del sistema es una capa fija que `visibility` no alcanza, y en
      papel solo sería una mancha. */

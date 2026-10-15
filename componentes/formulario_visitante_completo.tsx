@@ -29,6 +29,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -145,6 +146,9 @@ export function FormularioVisitanteCompleto({
   const { usuario } = useAutenticacion();
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
+  // Tarjeta fija y no notificación: el aviso pasaba en unos segundos y el
+  // taquillero se enteraba recién al intentar vender.
+  const [sinCaja, setSinCaja] = useState(false);
   /** Los catálogos vienen del almacenamiento local: pueden traer tarifas viejas. */
   const [desdeCache, setDesdeCache] = useState(false);
 
@@ -304,10 +308,7 @@ export function FormularioVisitanteCompleto({
         // instrucción con un siguiente paso claro. El rojo diría "algo se
         // rompió" cuando el sistema está haciendo exactamente lo que debe.
         if (esSinCajaAbierta(error)) {
-          toast.warning(
-            "No cuenta con caja abierta, abra una teniendo conexión a internet para emitir tickets sin conexión a internet.",
-            { duration: 12000 },
-          );
+          setSinCaja(true);
           return;
         }
 
@@ -724,6 +725,7 @@ export function FormularioVisitanteCompleto({
       setTieneCarnetGuia(true);
       setErrorPais(null);
       setErrorCantidades(null);
+      setSinCaja(false);
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : "No se pudo emitir el ticket";
 
@@ -739,11 +741,11 @@ export function FormularioVisitanteCompleto({
 
       // El backend exige una caja abierta para vender y responde 400 si no la hay
       const esFaltaDeCaja = err instanceof ApiError && err.status === 400 && /caja/i.test(mensaje);
-      toast.error(esFaltaDeCaja ? "No hay caja abierta" : "Error al emitir el ticket", {
-        description: esFaltaDeCaja
-          ? "Debe abrir la caja en el módulo Cierre Diario antes de emitir tickets."
-          : mensaje,
-      });
+      if (esFaltaDeCaja) {
+        setSinCaja(true);
+        return;
+      }
+      toast.error("Error al emitir el ticket", { description: mensaje });
     } finally {
       setEnviando(false);
     }
@@ -777,6 +779,24 @@ export function FormularioVisitanteCompleto({
   }
 
   return (
+    <div className="space-y-3">
+    {sinCaja && (
+      <div
+        role="alert"
+        className="rounded-xl border-2 border-amber-500/60 bg-amber-50 dark:bg-amber-950 p-3 flex items-start gap-3 shadow-md"
+      >
+        <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+        <div className="flex-1 text-sm">
+          <p className="font-bold text-amber-900 dark:text-amber-200">No hay caja abierta</p>
+          <p className="text-amber-900/80 dark:text-amber-200/80 mt-0.5">
+            Abra la caja, con conexión a internet, para poder emitir tickets, incluso sin conexión.
+          </p>
+        </div>
+        <Button asChild size="sm" variant="outline" className="shrink-0 border-amber-500/60">
+          <Link href="/cierre-diario">Abrir caja</Link>
+        </Button>
+      </div>
+    )}
     <Card className="bg-card border-border/50">
       <CardHeader className="pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 space-y-0 border-b border-border/40 mb-4">
         <div className="flex items-center gap-2">
@@ -1624,5 +1644,6 @@ export function FormularioVisitanteCompleto({
         </form>
       </CardContent>
     </Card>
+    </div>
   );
 }

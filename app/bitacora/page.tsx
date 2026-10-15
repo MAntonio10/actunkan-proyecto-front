@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -465,13 +465,6 @@ export default function BitacoraPage() {
                 Mostrando {bitacora.length} de {total} eventos de bitácora
                 {totalPaginas > 1 && ` · página ${pagina} de ${totalPaginas}`}
               </CardTitle>
-              <CardDescription>
-                Registro de auditoría en huso horario UTC-6,{' '}
-                {ordenAscendente ? 'del más antiguo al más reciente' : 'del más reciente al más antiguo'}.
-                La búsqueda y el filtro por módulo los aplica el servidor sobre el histórico
-                completo, así que el conteo de arriba y el paginador ya reflejan lo que encontró;
-                para ver lo más antiguo, vaya a la última página.
-              </CardDescription>
             </CardHeader>
             <CardContent className="p-0 sm:p-6">
               {cargando ? (

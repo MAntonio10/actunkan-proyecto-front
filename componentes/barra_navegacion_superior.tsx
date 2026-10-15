@@ -15,6 +15,14 @@ import { IndicadorSincronizacion } from "./indicador_sincronizacion";
 import { useAutenticacion } from "@/contexto/contexto_autenticacion";
 import { LogosInstitucionales } from "./logos_institucionales";
 import { motion } from "framer-motion";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export function BarraNavegacionSuperior() {
   const router = useRouter();
@@ -52,18 +60,18 @@ export function BarraNavegacionSuperior() {
             "linear-gradient(90deg, transparent 0%, color-mix(in oklch, var(--primary) 55%, transparent) 25%, color-mix(in oklch, var(--accent) 55%, transparent) 75%, transparent 100%)",
         }}
       />
-      <div className="flex h-[72px] items-center justify-between px-4 md:px-6">
+      <div className="flex h-[72px] items-center justify-between gap-2 px-3 sm:px-4 md:px-6">
         {/* Izquierda: Menu hamburguesa (mobile) o Menu de modulos (desktop) + Logo */}
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <MenuModulos />
 
           {/* Logo y nombre */}
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <motion.div
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.97 }}
               transition={{ type: "spring", stiffness: 320, damping: 18 }}
-              className="relative"
+              className="relative shrink-0"
             >
               {/* Resplandor sutil detras del medallon */}
               <span
@@ -74,7 +82,7 @@ export function BarraNavegacionSuperior() {
                     "radial-gradient(circle, color-mix(in oklch, var(--primary) 30%, transparent), transparent 70%)",
                 }}
               />
-              <span className="relative flex items-center justify-center rounded-2xl bg-card px-3 py-1.5 ring-2 ring-primary/30 shadow-md shadow-primary/15">
+              <span className="relative flex items-center justify-center rounded-2xl bg-card px-2 py-1.5 sm:px-3 ring-2 ring-primary/30 shadow-md shadow-primary/15">
                 <LogosInstitucionales tamano="sm" prioridad />
               </span>
             </motion.div>
@@ -96,23 +104,51 @@ export function BarraNavegacionSuperior() {
         </div>
 
         {/* Derecha: Indicador conectividad + Usuario */}
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
           <IndicadorSincronizacion />
           <IndicadorConectividad />
 
-          {/* Info del usuario */}
-          <div className="flex items-center gap-2 px-2">
+          {/* Info del usuario. En móvil el avatar abre el menú con sesiones y
+              salir: no caben como botones sueltos junto a los indicadores. */}
+          <div className="flex items-center gap-2 sm:px-2">
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-medium">{usuario?.nombre || 'Usuario'}</span>
               <span className="text-xs text-primary font-medium">
                 {usuario?.puesto?.nombre || 'Personal'}
               </span>
             </div>
-            <Avatar className="h-9 w-9 border-2 border-primary/30">
-              <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-                {iniciales}
-              </AvatarFallback>
-            </Avatar>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Menú de usuario"
+              >
+                <Avatar className="h-9 w-9 border-2 border-primary/30">
+                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                    {iniciales}
+                  </AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="flex flex-col">
+                  <span className="text-sm font-medium">{usuario?.nombre || 'Usuario'}</span>
+                  <span className="text-xs font-medium text-primary">
+                    {usuario?.puesto?.nombre || 'Personal'}
+                  </span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push("/sesiones")} className="cursor-pointer">
+                  <MonitorSmartphone className="mr-2 h-4 w-4" />
+                  Mis sesiones activas
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleCerrarSesion}
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Cerrar sesión
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Sesiones activas */}
@@ -122,7 +158,7 @@ export function BarraNavegacionSuperior() {
                 variant="ghost"
                 size="icon"
                 onClick={() => router.push("/sesiones")}
-                className="text-muted-foreground hover:text-primary"
+                className="hidden sm:inline-flex text-muted-foreground hover:text-primary"
               >
                 <MonitorSmartphone className="h-5 w-5" />
                 <span className="sr-only">Mis sesiones activas</span>
@@ -138,7 +174,7 @@ export function BarraNavegacionSuperior() {
                 variant="ghost"
                 size="icon"
                 onClick={handleCerrarSesion}
-                className="text-muted-foreground hover:text-destructive"
+                className="hidden sm:inline-flex text-muted-foreground hover:text-destructive"
               >
                 <LogOut className="h-5 w-5" />
                 <span className="sr-only">Cerrar sesion</span>
