@@ -1192,7 +1192,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           if (!abierto) setTicketDetalle(null);
         }}
       >
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-[calc(100%-3rem)] sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               {ticketDetalle?.tipoTicket === "GUIA" ? (

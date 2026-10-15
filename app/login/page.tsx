@@ -280,8 +280,9 @@ export default function AutenticacionPage() {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-4 overflow-hidden">
-      {/* Fondo decorativo */}
+    <div className="relative min-h-[100svh] flex flex-col items-center justify-center px-4 py-3 overflow-hidden">
+      {/* Fondo decorativo. El velo del centro va suave para que el mapa se
+          alcance a ver a través del vidrio de la tarjeta. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -289,7 +290,7 @@ export default function AutenticacionPage() {
           backgroundImage: `
             radial-gradient(ellipse 60% 50% at 15% 10%, color-mix(in oklch, var(--primary) 22%, transparent), transparent 65%),
             radial-gradient(ellipse 55% 50% at 90% 95%, color-mix(in oklch, var(--accent) 28%, transparent), transparent 65%),
-            radial-gradient(ellipse 80% 60% at 50% 50%, color-mix(in oklch, var(--background) 80%, transparent), transparent 80%)
+            radial-gradient(ellipse 80% 60% at 50% 50%, color-mix(in oklch, var(--background) 35%, transparent), transparent 80%)
           `,
         }}
       />
@@ -310,9 +311,9 @@ export default function AutenticacionPage() {
         />
       </svg>
 
-      <div className="relative z-10 w-full max-w-md space-y-6">
+      <div className="relative z-10 w-full max-w-md space-y-4 sm:space-y-6">
         {/* Logo y Titular */}
-        <div className="text-center space-y-3">
+        <div className="text-center space-y-2 sm:space-y-3">
           <div className="relative mx-auto w-fit">
             <div
               aria-hidden
@@ -322,15 +323,16 @@ export default function AutenticacionPage() {
                   "radial-gradient(circle, color-mix(in oklch, var(--primary) 35%, transparent), transparent 70%)",
               }}
             />
-            <div className="relative rounded-2xl bg-card px-5 py-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10">
-              <LogosInstitucionales tamano="lg" prioridad />
+            <div className="relative rounded-2xl bg-card px-4 py-2 sm:px-5 sm:py-3 ring-2 ring-primary/30 shadow-lg shadow-primary/10">
+              <LogosInstitucionales tamano="md" prioridad className="sm:hidden" />
+              <LogosInstitucionales tamano="lg" prioridad className="hidden sm:flex" />
             </div>
           </div>
           <div className="space-y-1">
             <p className="text-xs font-medium uppercase tracking-[0.3em] text-muted-foreground">
               Parque Regional Municipal
             </p>
-            <h1 className="text-xl font-bold uppercase tracking-[0.35em] text-foreground">
+            <h1 className="text-lg sm:text-xl font-bold uppercase tracking-[0.35em] text-foreground">
               ACTÚN KAN
             </h1>
           </div>
@@ -338,8 +340,8 @@ export default function AutenticacionPage() {
 
         {/* VISTA 1: FORMULARIO DE LOGIN */}
         {vista === "login" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card">
-            <CardHeader className="text-center pb-2 pt-6">
+          <Card className="card-vidrio gap-4 py-5 sm:gap-6 sm:py-6">
+            <CardHeader className="text-center pb-0 sm:pb-2">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <Shield className="h-5 w-5 text-primary" />
                 Iniciar Sesión
@@ -483,8 +485,8 @@ export default function AutenticacionPage() {
 
         {/* VISTA 2: SOLICITAR CÓDIGO DE RESTABLECIMIENTO */}
         {vista === "solicitar" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card">
-            <CardHeader className="text-center pb-2 pt-6">
+          <Card className="card-vidrio gap-4 py-5 sm:gap-6 sm:py-6">
+            <CardHeader className="text-center pb-0 sm:pb-2">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <KeyRound className="h-5 w-5 text-primary" />
                 ¿Olvidó su contraseña?
@@ -555,8 +557,8 @@ export default function AutenticacionPage() {
 
         {/* VISTA 3: VALIDAR CÓDIGO Y RESTABLECER CONTRASEÑA */}
         {vista === "restablecer" && (
-          <Card className="card-realzada acento-superior border-border/60 bg-card">
-            <CardHeader className="text-center pb-2 pt-6">
+          <Card className="card-vidrio gap-4 py-5 sm:gap-6 sm:py-6">
+            <CardHeader className="text-center pb-0 sm:pb-2">
               <CardTitle className="flex items-center justify-center gap-2 text-lg">
                 <Lock className="h-5 w-5 text-primary" />
                 Restablecer Contraseña

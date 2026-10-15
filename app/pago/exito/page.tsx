@@ -175,8 +175,8 @@ function ContenidoPagoExito() {
       : 'pendiente'
 
   return (
-    <Card className="w-full max-w-md bg-card border-border/60 shadow-2xl overflow-hidden animate-in fade-in duration-300">
-      <CardContent className="p-5 sm:p-6">
+    <Card className="w-full max-w-md h-full max-h-[760px] py-0 gap-0 bg-card border-border/60 shadow-2xl overflow-hidden animate-in fade-in duration-300">
+      <CardContent className="h-full p-4 sm:p-6">
         <TerminalPago
           resultado={estado}
           exito={{
@@ -229,7 +229,7 @@ function ContenidoPagoExito() {
 
 export default function PaginaPagoExito() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+    <div className="h-[100svh] flex flex-col items-center gap-3 px-3 py-3 sm:gap-5 sm:p-6 relative overflow-hidden">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -241,17 +241,18 @@ export default function PaginaPagoExito() {
         }}
       />
 
-      <header className="mb-6 flex flex-col items-center text-center">
-        <LogosInstitucionales tamano="md" prioridad className="mb-3" />
-        <h1 className="text-xl font-bold tracking-tight text-foreground">
+      <header className="shrink-0 flex flex-col items-center text-center">
+        <LogosInstitucionales tamano="sm" prioridad className="mb-1.5 sm:hidden" />
+        <LogosInstitucionales tamano="md" prioridad className="mb-3 hidden sm:flex" />
+        <h1 className="text-base sm:text-xl font-bold tracking-tight text-foreground">
           Parque Regional Municipal Actún Kan
         </h1>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[11px] sm:text-xs text-muted-foreground">
           Santa Elena, Flores, Petén · Pasarela de Cobro Digital
         </p>
       </header>
 
-      <main className="w-full flex justify-center">
+      <main className="w-full flex-1 min-h-0 flex justify-center overflow-y-auto">
         <Suspense
           fallback={
             <Card className="w-full max-w-md bg-card p-8 flex flex-col items-center justify-center gap-3">
@@ -264,7 +265,7 @@ export default function PaginaPagoExito() {
         </Suspense>
       </main>
 
-      <footer className="mt-8 text-center text-xs text-muted-foreground">
+      <footer className="shrink-0 text-center text-[10px] sm:text-xs text-muted-foreground">
         © {new Date().getFullYear()} Parque Regional Municipal Actún Kan & ProPetén
       </footer>
     </div>

@@ -120,12 +120,15 @@ export function TerminalPago({
   const subtitulo = ok ? exito.subtitulo : error ? fallo.subtitulo : fase === 'verificando' ? subtituloEspera : ''
 
   return (
-    <div className="flex w-full flex-col items-center gap-5">
+    <div className="flex h-full w-full flex-col items-center gap-3 sm:gap-4">
       <style>{ESTILOS}</style>
 
+      {/* La escena toma solo el alto que sobra: así la página entera cabe en la
+          pantalla sin scroll, en cualquier teléfono. */}
+      <div className="relative w-full min-h-0 flex-1">
       <svg
         viewBox="0 0 360 490"
-        className="h-[50svh] max-h-[440px] min-h-[300px] w-full"
+        className="absolute inset-0 h-full w-full"
         role="img"
         aria-label={ok ? 'Terminal: pago aprobado' : error ? 'Terminal: pago rechazado' : 'Terminal: verificando el pago'}
       >
@@ -246,7 +249,7 @@ export function TerminalPago({
             return (
               <rect
                 key={i}
-                x={113 + col * 56}
+                x={102 + col * 56}
                 y={264 + fila * 42}
                 width="44"
                 height="32"
@@ -293,17 +296,18 @@ export function TerminalPago({
           </text>
         </g>
       </svg>
+      </div>
 
-      <div aria-live="polite" className="min-h-[3.5rem] text-center">
+      <div aria-live="polite" className="min-h-[3rem] shrink-0 text-center">
         <h2
           className={cn(
-            'text-xl font-bold tracking-tight',
+            'text-lg sm:text-xl font-bold tracking-tight',
             ok ? 'text-primary' : error ? 'text-destructive' : 'text-foreground',
           )}
         >
           {titulo}
         </h2>
-        {subtitulo && <p className="mx-auto mt-1 max-w-xs text-sm text-muted-foreground">{subtitulo}</p>}
+        {subtitulo && <p className="mx-auto mt-1 max-w-xs text-xs sm:text-sm text-muted-foreground">{subtitulo}</p>}
       </div>
 
       {fase === 'final' && children}
@@ -313,7 +317,7 @@ export function TerminalPago({
           ref={boton}
           onClick={onTerminar}
           className={cn(
-            'h-[60px] w-full cursor-pointer text-base font-semibold text-foreground shadow-sm',
+            'h-[60px] w-full shrink-0 cursor-pointer text-base font-semibold text-foreground shadow-sm',
             ok
               ? 'border border-primary/40 bg-[color-mix(in_oklch,var(--primary)_22%,var(--card))] hover:bg-[color-mix(in_oklch,var(--primary)_30%,var(--card))]'
               : 'border border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_18%,var(--card))] hover:bg-[color-mix(in_oklch,var(--destructive)_26%,var(--card))]',
@@ -323,7 +327,7 @@ export function TerminalPago({
         </Button>
       ) : (
         // Reserva el alto del botón para que la página no salte al aparecer.
-        <div aria-hidden className="h-[60px]" />
+        <div aria-hidden className="h-[60px] shrink-0" />
       )}
     </div>
   )

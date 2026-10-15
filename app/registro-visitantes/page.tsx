@@ -13,6 +13,7 @@ import { PaseImprimible } from '@/componentes/pase_imprimible'
 import { PanelCheckoutTarjeta } from '@/componentes/panel_checkout_tarjeta'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,9 @@ import {
   Printer,
   CreditCard,
   RefreshCw,
+  Copy,
+  Send,
+  ExternalLink,
 } from 'lucide-react'
 import { Spinner } from '@/components/ui/spinner'
 import { usePdfTicket } from '@/hooks/use_pdf_ticket'
@@ -150,7 +154,6 @@ export default function RegistroVisitantesPage() {
     setCheckoutModalAbierto(false)
   }, [])
 
-  const sinLink = ticketsPorCobrar.filter((t) => !linksPago[t.id])
   const panelesCobro = ticketsPorCobrar.map((t) =>
     linksPago[t.id] ? (
       <PanelCheckoutTarjeta
@@ -337,72 +340,114 @@ export default function RegistroVisitantesPage() {
             open={checkoutModalAbierto && ticketsPorCobrar.length > 0}
             onOpenChange={setCheckoutModalAbierto}
           >
-            <DialogContent className="max-w-lg p-0 overflow-hidden border-2 border-amber-500/50 max-h-[90vh] overflow-y-auto">
-              <DialogHeader className="sr-only">
-                <DialogTitle>Enlace de Pago con Tarjeta</DialogTitle>
-                <DialogDescription>
-                  Comparte el enlace de pago de Recurrente con el cliente
+            {/* Compacto: un renglón por link. El detalle completo (correo, etc.)
+                sigue en el panel de la columna y en el historial. */}
+            <DialogContent className="max-w-[calc(100%-3rem)] sm:max-w-md p-4 gap-3 border-2 border-amber-500/50">
+              <DialogHeader className="text-left pr-6">
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <CreditCard className="h-4 w-4 text-amber-600" />
+                  {ticketsPorCobrar.length > 1 ? 'Links de pago' : 'Link de pago'}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Compártelo con el cliente. El pase se activa al confirmarse el pago.
                 </DialogDescription>
               </DialogHeader>
 
-              {(() => {
-                if (sinLink.length === 0) {
+              <div className="space-y-2.5">
+                {ticketsPorCobrar.map((t) => {
+                  const url = linksPago[t.id]
                   return (
-                    <div className="p-1 space-y-3">
-                      {panelesCobro}
-                      <div className="px-4 pb-3 flex justify-end">
+                    <div key={t.id} className="rounded-lg border border-border/70 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-semibold">
+                          {t.tipoTicket === 'GUIA' ? 'Link guía' : 'Link visitante'}
+                        </span>
+                        <span className="font-bold text-amber-700 dark:text-amber-400">
+                          Q{parseFloat(t.montoTotal).toFixed(2)}
+                        </span>
+                      </div>
+                      {url ? (
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            readOnly
+                            value={url}
+                            onClick={(e) => (e.target as HTMLInputElement).select()}
+                            className="h-8 font-mono text-[11px]"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 cursor-pointer"
+                            title="Copiar link"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(url)
+                              toast.success('Link copiado')
+                            }}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            asChild
+                            className="h-8 w-8 shrink-0 text-[#128C7E] border-[#25D366]/40"
+                            title="Enviar por WhatsApp"
+                          >
+                            <a
+                              href={`https://wa.me/?text=${encodeURIComponent(`Enlace de pago del Parque Actún Kan (${t.numeroTicket}): ${url}`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                            </a>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            asChild
+                            className="h-8 w-8 shrink-0"
+                            title="Abrir link"
+                          >
+                            <a href={url} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          </Button>
+                        </div>
+                      ) : cargandoCheckout ? (
+                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Spinner className="h-3.5 w-3.5" /> Generando link…
+                        </p>
+                      ) : (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => setCheckoutModalAbierto(false)}
-                          className="text-xs font-semibold cursor-pointer"
+                          onClick={async () => {
+                            if (await cargarLinks([t])) toast.success('Link obtenido')
+                            else toast.warning('Aún no se ha generado el link en la pasarela')
+                          }}
+                          className="h-8 w-full gap-1.5 text-xs cursor-pointer"
                         >
-                          Entendido, continuar
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Reintentar obtener link
                         </Button>
-                      </div>
+                      )}
                     </div>
                   )
-                }
+                })}
+              </div>
 
-                if (cargandoCheckout) {
-                  return (
-                    <div className="p-8 flex flex-col items-center justify-center gap-3 text-center">
-                      <Spinner className="h-8 w-8 text-primary" />
-                      <p className="text-sm font-medium text-muted-foreground">
-                        Generando enlace de pago en pasarela Recurrente...
-                      </p>
-                    </div>
-                  )
-                }
-
-                return (
-                  <div className="p-6 text-center space-y-4">
-                    {/* Los links que sí se obtuvieron no se esconden por el que falta. */}
-                    {panelesCobro}
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200">
-                      <CreditCard className="h-6 w-6 text-amber-600 mx-auto mb-2" />
-                      <p className="font-bold text-sm">Ticket emitido con cobro PENDIENTE</p>
-                      <p className="mt-1">
-                        El ticket fue generado en el sistema. Puedes consultar el enlace en el historial de tickets o reintentar obtenerlo ahora.
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        if (await cargarLinks(sinLink)) toast.success('Enlace de pago obtenido')
-                        else toast.warning('Aún no se ha generado la URL de pasarela')
-                      }}
-                      className="gap-1.5 text-xs cursor-pointer"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Reintentar obtención de link
-                    </Button>
-                  </div>
-                )
-              })()}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCheckoutModalAbierto(false)}
+                className="w-full cursor-pointer"
+              >
+                Cerrar
+              </Button>
             </DialogContent>
           </Dialog>
 
