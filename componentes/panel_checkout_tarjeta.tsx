@@ -30,6 +30,8 @@ import { api } from '@/lib/api'
 const CORREO_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 interface PanelCheckoutTarjetaProps {
+  /** A cuál ticket corresponde, cuando la venta lleva dos cobros (visitante y guía). */
+  etiqueta?: string
   checkoutUrl: string
   /**
    * Ticket al que pertenece el enlace. Hace falta para que el correo lo mande el
@@ -44,6 +46,7 @@ interface PanelCheckoutTarjetaProps {
 }
 
 export function PanelCheckoutTarjeta({
+  etiqueta,
   checkoutUrl,
   idTicket,
   numeroTicket,
@@ -120,11 +123,11 @@ export function PanelCheckoutTarjeta({
           <div className="flex items-center gap-2">
             <CreditCard className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <CardTitle className="text-sm font-bold text-amber-900 dark:text-amber-300">
-              Cobro con Tarjeta · Enlace de Pago
+              {etiqueta ?? 'Cobro con Tarjeta · Enlace de Pago'}
             </CardTitle>
           </div>
-          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40">
-            Pendiente
+          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/40 whitespace-nowrap">
+            {montoStr ? `${montoStr} · Pendiente` : 'Pendiente'}
           </span>
         </div>
         <CardDescription className="text-xs text-amber-800/80 dark:text-amber-400/80 mt-1">

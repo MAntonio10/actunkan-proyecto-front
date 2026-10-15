@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior'
 import { RutaProtegida } from '@/componentes/ruta_protegida'
 import {
@@ -34,7 +34,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { usePdfTicket } from '@/hooks/use_pdf_ticket'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { extraerCheckoutUrl, esPagoPendiente } from '@/lib/utils_pagos'
+import { extraerCheckoutUrl, esPagoPendiente, esPagoPagado } from '@/lib/utils_pagos'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
@@ -47,8 +47,7 @@ export default function RegistroVisitantesPage() {
   const { abrirPdf, pdfEnCursoId } = usePdfTicket()
   const [datosPreview, setDatosPreview] = useState<DatosTicketPreview | undefined>()
   const [ticketsEmitidos, setTicketsEmitidos] = useState<TicketBackend[]>([])
-  const [respuestaEmision, setRespuestaEmision] = useState<RespuestaEmisionTicket | null>(null)
-  const [checkoutUrlEmitido, setCheckoutUrlEmitido] = useState<string | null>(null)
+  const [linksPago, setLinksPago] = useState<Record<number, string>>({})
   const [checkoutModalAbierto, setCheckoutModalAbierto] = useState<boolean>(false)
   const [cargandoCheckout, setCargandoCheckout] = useState<boolean>(false)
   const [pestanaActiva, setPestanaActiva] = useState<string>('emision')
@@ -69,42 +68,71 @@ export default function RegistroVisitantesPage() {
     setCatalogos(c)
   }, [])
 
-  const handleTicketEmitido = useCallback(async (respuesta: RespuestaEmisionTicket) => {
-    setRespuestaEmision(respuesta)
-    const lista = Array.isArray(respuesta?.tickets) ? respuesta.tickets : []
-    setTicketsEmitidos(lista)
-    setRefrescarHistorial((n) => n + 1)
+  // Cada ticket con tarjeta tiene su propio link: con guía sin carnet pueden ser
+  // dos cobros, o solo el del guía si el visitante pagó en efectivo.
+  const ticketsPorCobrar = ticketsEmitidos.filter((t) => t.id > 0 && esPagoPendiente(t.estadoPago))
+  const idsPorCobrar = ticketsPorCobrar.map((t) => t.id).join(',')
 
-    // 1. Extraer URL de checkout de la respuesta (directa o anidada)
-    let url = extraerCheckoutUrl(respuesta)
-
-    const primerTicket = lista[0]
-
-    // 2. Comprobar si el ticket es con pago con tarjeta o pendiente
-    const esTarjeta =
-      lista.some((t) => esPagoPendiente(t.estadoPago)) ||
-      Boolean(url)
-
-    // 3. Si no vino en la respuesta directa pero el ticket tiene id, consultar /pagos/ticket/:idTicket
-    if (!url && primerTicket?.id) {
-      setCargandoCheckout(true)
-      try {
-        const infoPago = await api.pagos.getPorTicket(primerTicket.id)
-        url = extraerCheckoutUrl(infoPago)
-      } catch (err) {
-        console.warn('Consulta de pago por ticket:', err)
-      } finally {
-        setCargandoCheckout(false)
-      }
-    }
-
-    if (url) {
-      setCheckoutUrlEmitido(url)
-      setCheckoutModalAbierto(true)
-    } else if (esTarjeta) {
-      setCheckoutModalAbierto(true)
+  /** Busca el link de los tickets que todavía no lo tienen. */
+  const cargarLinks = useCallback(async (tickets: TicketBackend[]) => {
+    setCargandoCheckout(true)
+    try {
+      const pares = await Promise.all(
+        tickets.map(async (t) => {
+          let url = extraerCheckoutUrl(t)
+          if (!url) {
+            try {
+              url = extraerCheckoutUrl(await api.pagos.getPorTicket(t.id))
+            } catch (err) {
+              console.warn('Consulta de pago por ticket:', err)
+            }
+          }
+          return [t.id, url] as const
+        }),
+      )
+      setLinksPago((prev) => {
+        const siguiente = { ...prev }
+        for (const [id, url] of pares) if (url) siguiente[id] = url
+        return siguiente
+      })
+      return pares.every(([, url]) => url)
+    } finally {
+      setCargandoCheckout(false)
     }
   }, [])
+
+  const handleTicketEmitido = useCallback(async (respuesta: RespuestaEmisionTicket) => {
+    const lista = Array.isArray(respuesta?.tickets) ? respuesta.tickets : []
+    setTicketsEmitidos(lista)
+    setLinksPago({})
+    setRefrescarHistorial((n) => n + 1)
+
+    const pendientes = lista.filter((t) => t.id > 0 && esPagoPendiente(t.estadoPago))
+    if (pendientes.length === 0) return
+    setCheckoutModalAbierto(true)
+    await cargarLinks(pendientes)
+  }, [cargarLinks])
+
+  // Sin esto el pase se quedaba en «Pago pendiente» aunque el webhook ya lo
+  // hubiera confirmado: la respuesta de emisión es una foto del momento.
+  useEffect(() => {
+    if (!idsPorCobrar) return
+    const ids = idsPorCobrar.split(',').map(Number)
+    const intervalo = setInterval(async () => {
+      const resultados = await Promise.allSettled(ids.map((id) => api.tickets.getTicketById(id)))
+      const actualizados = resultados.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+      const confirmados = actualizados.filter((t) => !esPagoPendiente(t.estadoPago))
+      if (confirmados.length === 0) return
+      setTicketsEmitidos((prev) => prev.map((t) => confirmados.find((c) => c.id === t.id) ?? t))
+      for (const t of confirmados) {
+        const quien = t.tipoTicket === 'GUIA' ? 'del guía' : 'del visitante'
+        if (esPagoPagado(t.estadoPago)) toast.success(`Pago confirmado: ticket ${quien} ${t.numeroTicket}`)
+        else toast.error(`El pago del ticket ${quien} ${t.numeroTicket} no se completó`)
+      }
+      setRefrescarHistorial((n) => n + 1)
+    }, 5000)
+    return () => clearInterval(intervalo)
+  }, [idsPorCobrar])
 
   const cambiarPestana = useCallback((valor: string) => {
     setPestanaActiva(valor)
@@ -118,10 +146,25 @@ export default function RegistroVisitantesPage() {
 
   const reiniciarEmision = useCallback(() => {
     setTicketsEmitidos([])
-    setRespuestaEmision(null)
-    setCheckoutUrlEmitido(null)
+    setLinksPago({})
     setCheckoutModalAbierto(false)
   }, [])
+
+  const sinLink = ticketsPorCobrar.filter((t) => !linksPago[t.id])
+  const panelesCobro = ticketsPorCobrar.map((t) =>
+    linksPago[t.id] ? (
+      <PanelCheckoutTarjeta
+        key={t.id}
+        etiqueta={t.tipoTicket === 'GUIA' ? 'Ticket del guía' : 'Ticket del visitante'}
+        checkoutUrl={linksPago[t.id]}
+        idTicket={t.id}
+        numeroTicket={t.numeroTicket}
+        montoTotal={t.montoTotal}
+        nombreVisitante={t.nombre || undefined}
+        atraccion={t.atraccion?.nombre}
+      />
+    ) : null,
+  )
 
   return (
     <RutaProtegida moduloRequerido="EmisionTickets">
@@ -210,27 +253,8 @@ export default function RegistroVisitantesPage() {
 
               <div className="lg:col-span-2 lg:min-h-0 lg:overflow-y-auto scroll-sin-barra">
                 <div className="space-y-3">
-                  {/* Panel de Enlace de Pago si se emitió con tarjeta */}
-                  {(() => {
-                    const urlCheckout =
-                      checkoutUrlEmitido ||
-                      extraerCheckoutUrl(respuestaEmision) ||
-                      extraerCheckoutUrl(ticketsEmitidos)
-
-                    if (!urlCheckout) return null
-
-                    const primerTicket = ticketsEmitidos[0]
-                    return (
-                      <PanelCheckoutTarjeta
-                        checkoutUrl={urlCheckout}
-                        idTicket={primerTicket?.id}
-                        numeroTicket={primerTicket?.numeroTicket}
-                        montoTotal={respuestaEmision?.montoTotalGeneral || primerTicket?.montoTotal}
-                        nombreVisitante={primerTicket?.nombre || undefined}
-                        atraccion={primerTicket?.atraccion?.nombre}
-                      />
-                    )
-                  })()}
+                  {/* Panel de Enlace de Pago por cada ticket cobrado con tarjeta */}
+                  {panelesCobro}
 
                   <PaseAcceso
                     preview={datosPreview}
@@ -308,8 +332,12 @@ export default function RegistroVisitantesPage() {
           </div>
 
           {/* Modal emergente para compartir enlace de pago al emitir con tarjeta */}
-          <Dialog open={checkoutModalAbierto} onOpenChange={setCheckoutModalAbierto}>
-            <DialogContent className="max-w-lg p-0 overflow-hidden border-2 border-amber-500/50">
+          {/* Se cierra solo cuando ya no queda nada por cobrar. */}
+          <Dialog
+            open={checkoutModalAbierto && ticketsPorCobrar.length > 0}
+            onOpenChange={setCheckoutModalAbierto}
+          >
+            <DialogContent className="max-w-lg p-0 overflow-hidden border-2 border-amber-500/50 max-h-[90vh] overflow-y-auto">
               <DialogHeader className="sr-only">
                 <DialogTitle>Enlace de Pago con Tarjeta</DialogTitle>
                 <DialogDescription>
@@ -318,23 +346,10 @@ export default function RegistroVisitantesPage() {
               </DialogHeader>
 
               {(() => {
-                const urlCheckout =
-                  checkoutUrlEmitido ||
-                  extraerCheckoutUrl(respuestaEmision) ||
-                  extraerCheckoutUrl(ticketsEmitidos)
-
-                if (urlCheckout) {
-                  const primerTicket = ticketsEmitidos[0]
+                if (sinLink.length === 0) {
                   return (
                     <div className="p-1 space-y-3">
-                      <PanelCheckoutTarjeta
-                        checkoutUrl={urlCheckout}
-                        idTicket={primerTicket?.id}
-                        numeroTicket={primerTicket?.numeroTicket}
-                        montoTotal={respuestaEmision?.montoTotalGeneral || primerTicket?.montoTotal}
-                        nombreVisitante={primerTicket?.nombre || undefined}
-                        atraccion={primerTicket?.atraccion?.nombre}
-                      />
+                      {panelesCobro}
                       <div className="px-4 pb-3 flex justify-end">
                         <Button
                           type="button"
@@ -363,6 +378,8 @@ export default function RegistroVisitantesPage() {
 
                 return (
                   <div className="p-6 text-center space-y-4">
+                    {/* Los links que sí se obtuvieron no se esconden por el que falta. */}
+                    {panelesCobro}
                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200">
                       <CreditCard className="h-6 w-6 text-amber-600 mx-auto mb-2" />
                       <p className="font-bold text-sm">Ticket emitido con cobro PENDIENTE</p>
@@ -370,34 +387,19 @@ export default function RegistroVisitantesPage() {
                         El ticket fue generado en el sistema. Puedes consultar el enlace en el historial de tickets o reintentar obtenerlo ahora.
                       </p>
                     </div>
-                    {ticketsEmitidos[0]?.id && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          setCargandoCheckout(true)
-                          try {
-                            const info = await api.pagos.getPorTicket(ticketsEmitidos[0].id)
-                            const u = extraerCheckoutUrl(info)
-                            if (u) {
-                              setCheckoutUrlEmitido(u)
-                              toast.success('Enlace de pago obtenido')
-                            } else {
-                              toast.warning('Aún no se ha generado la URL de pasarela')
-                            }
-                          } catch (e) {
-                            toast.error('No se pudo obtener el enlace de pago')
-                          } finally {
-                            setCargandoCheckout(false)
-                          }
-                        }}
-                        className="gap-1.5 text-xs cursor-pointer"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Reintentar obtención de link
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (await cargarLinks(sinLink)) toast.success('Enlace de pago obtenido')
+                        else toast.warning('Aún no se ha generado la URL de pasarela')
+                      }}
+                      className="gap-1.5 text-xs cursor-pointer"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Reintentar obtención de link
+                    </Button>
                   </div>
                 )
               })()}
