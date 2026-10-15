@@ -117,38 +117,47 @@ export function BarraNavegacionSuperior() {
                 {usuario?.puesto?.nombre || 'Personal'}
               </span>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Menú de usuario"
-              >
-                <Avatar className="h-9 w-9 border-2 border-primary/30">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-                    {iniciales}
-                  </AvatarFallback>
-                </Avatar>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel className="flex flex-col">
-                  <span className="text-sm font-medium">{usuario?.nombre || 'Usuario'}</span>
-                  <span className="text-xs font-medium text-primary">
-                    {usuario?.puesto?.nombre || 'Personal'}
-                  </span>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => router.push("/sesiones")} className="cursor-pointer">
-                  <MonitorSmartphone className="mr-2 h-4 w-4" />
-                  Mis sesiones activas
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={handleCerrarSesion}
-                  className="cursor-pointer text-destructive focus:text-destructive"
+            {/* En escritorio el avatar es solo identificación: sesiones y
+                salir son los botones de la derecha. */}
+            <Avatar className="hidden sm:flex h-9 w-9 border-2 border-primary/30">
+              <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                {iniciales}
+              </AvatarFallback>
+            </Avatar>
+            <div className="sm:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="rounded-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Menú de usuario"
                 >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Cerrar sesión
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <Avatar className="h-9 w-9 border-2 border-primary/30">
+                    <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                      {iniciales}
+                    </AvatarFallback>
+                  </Avatar>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="flex flex-col">
+                    <span className="text-sm font-medium">{usuario?.nombre || 'Usuario'}</span>
+                    <span className="text-xs font-medium text-primary">
+                      {usuario?.puesto?.nombre || 'Personal'}
+                    </span>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => router.push("/sesiones")} className="cursor-pointer">
+                    <MonitorSmartphone className="mr-2 h-4 w-4" />
+                    Mis sesiones activas
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleCerrarSesion}
+                    className="cursor-pointer text-destructive focus:text-destructive"
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Cerrar sesión
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Sesiones activas */}

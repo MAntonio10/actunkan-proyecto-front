@@ -45,7 +45,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" translate="no" className="notranslate">
-      <body className="font-sans antialiased min-h-screen bg-background">
+      {/* dvh y no vh: en el celular 100vh incluye la barra del navegador y el
+          body quedaba más alto que la pantalla, con scroll en el login. */}
+      <body className="font-sans antialiased min-h-dvh bg-background">
         <ProveedorAutenticacion>
           {children}
           <BarraNavegacionInferior />
