@@ -50,19 +50,42 @@ function DialogOverlay({
   )
 }
 
+/** Selects, menús y popovers: lo que un toque fuera debe cerrar antes que el modal. */
+const FLOTANTES_ABIERTOS =
+  '[data-slot="select-content"], [data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]'
+
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // En pantallas táctiles Radix procesa el «toque fuera» en el click y no en el
+  // pointerdown. Al tocar fuera de un Select abierto dentro del modal, el Select
+  // se cierra primero y el mismo click alcanza al modal, que ya volvió a ser la
+  // capa de arriba, y lo cerraba también. Si al empezar el toque había algo
+  // flotante abierto, ese toque es solo para cerrarlo a él.
+  const habiaFlotante = React.useRef(false)
+  React.useEffect(() => {
+    const alTocar = () => {
+      habiaFlotante.current = document.querySelector(FLOTANTES_ABIERTOS) !== null
+    }
+    document.addEventListener('pointerdown', alTocar, true)
+    return () => document.removeEventListener('pointerdown', alTocar, true)
+  }, [])
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        onPointerDownOutside={(evento) => {
+          if (habiaFlotante.current) evento.preventDefault()
+          onPointerDownOutside?.(evento)
+        }}
         // Tope de alto y scroll propio: sin esto un modal alto -- los de
         // permisos de usuarios, o cualquiera con el teclado abierto en movil --
         // se sale de la pantalla y el boton de confirmar queda inalcanzable.

@@ -45,13 +45,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { useAutenticacion } from '@/contexto/contexto_autenticacion'
-import {
-  almacenamientoEsPersistente,
-  db,
-  obtenerIdDispositivo,
-  usoDeAlmacenamiento,
-} from '@/lib/db_tickets'
-import { hayCriptoDisponible } from '@/lib/cripto_offline'
+import { db } from '@/lib/db_tickets'
 import { diagnosticarOffline, type DiagnosticoOffline } from '@/lib/diagnostico_offline'
 import { anularVentaLocal, aplicarSeleccionDeSubida } from '@/lib/emision_offline'
 import {
@@ -150,8 +144,6 @@ export default function SincronizacionPage() {
   const [estado, setEstado] = useState<EstadoSincronizacion | null>(null)
   const [ventas, setVentas] = useState<VentaPendienteLocal[]>([])
   const [trabajando, setTrabajando] = useState(false)
-  const [persistente, setPersistente] = useState<boolean | null>(null)
-  const [uso, setUso] = useState<{ usado: number; total: number } | null>(null)
   const [offline, setOffline] = useState<DiagnosticoOffline | null>(null)
 
   const [aAnular, setAAnular] = useState<VentaPendienteLocal | null>(null)
@@ -164,13 +156,7 @@ export default function SincronizacionPage() {
   const [seleccion, setSeleccion] = useState<Record<string, boolean>>({})
 
   const releer = useCallback(async () => {
-    const [cola, protegido, espacio] = await Promise.all([
-      db.ventasPendientes.orderBy('fechaCreacion').reverse().toArray(),
-      almacenamientoEsPersistente(),
-      usoDeAlmacenamiento(),
-    ])
-    setPersistente(protegido)
-    setUso(espacio)
+    const cola = await db.ventasPendientes.orderBy('fechaCreacion').reverse().toArray()
     // Las ya subidas salen de la lista: no piden nada. Las anuladas se quedan
     // como registro de lo ocurrido en el turno.
     setVentas(cola.filter((v) => v.estado !== 'sincronizada'))
@@ -329,7 +315,6 @@ export default function SincronizacionPage() {
       setADescartar(null)
     })
 
-  const idDispositivo = typeof window !== 'undefined' ? obtenerIdDispositivo() : ''
 
   // Gateada en `EmisionTickets` y NO en `Sincronizacion`, aunque ese módulo
   // exista en el backend desde que se administran dispositivos. Es a propósito:
@@ -772,16 +757,6 @@ export default function SincronizacionPage() {
                   <dd className="font-medium">{hora(estado?.ultimaSincronizacion)}</dd>
                 </div>
                 <div className="flex justify-between gap-4 py-1 border-b border-border/40">
-                  <dt className="text-muted-foreground">Almacenamiento seguro</dt>
-                  <dd className="font-medium">
-                    {hayCriptoDisponible() ? (
-                      'Disponible'
-                    ) : (
-                      <span className="text-destructive">No disponible — se requiere HTTPS</span>
-                    )}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4 py-1 border-b border-border/40">
                   <dt className="text-muted-foreground">Modo sin conexión</dt>
                   <dd className="font-medium text-right">
                     {offline === null ? (
@@ -812,33 +787,6 @@ export default function SincronizacionPage() {
                       </>
                     )}
                   </dd>
-                </div>
-                <div className="flex justify-between gap-4 py-1 border-b border-border/40">
-                  <dt className="text-muted-foreground">Almacenamiento protegido</dt>
-                  <dd className="font-medium">
-                    {persistente === null ? (
-                      '—'
-                    ) : persistente ? (
-                      'Sí'
-                    ) : (
-                      <span className="text-amber-600">
-                        No — el navegador podría borrar los datos
-                      </span>
-                    )}
-                  </dd>
-                </div>
-                {uso && (
-                  <div className="flex justify-between gap-4 py-1 border-b border-border/40">
-                    <dt className="text-muted-foreground">Espacio usado</dt>
-                    <dd className="font-medium">
-                      {(uso.usado / 1_048_576).toFixed(1)} MB
-                      {uso.total > 0 && ` de ${(uso.total / 1_048_576).toFixed(0)} MB`}
-                    </dd>
-                  </div>
-                )}
-                <div className="flex justify-between gap-4 py-1 sm:col-span-2">
-                  <dt className="text-muted-foreground shrink-0">Identificador del dispositivo</dt>
-                  <dd className="font-mono text-[11px] truncate">{idDispositivo || '—'}</dd>
                 </div>
               </dl>
             </CardContent>

@@ -143,25 +143,6 @@ class BaseTickets extends Dexie {
 export const db = new BaseTickets()
 
 /**
- * Identificador estable de este dispositivo. El backend lo usa para atar el
- * lote de folios a la tablet y para devolverlo tras una reinstalación.
- *
- * Vive en localStorage, no en Dexie: hace falta de forma síncrona y antes de
- * que la base esté abierta.
- */
-const CLAVE_DISPOSITIVO = 'id_dispositivo'
-
-export function obtenerIdDispositivo(): string {
-  if (typeof window === 'undefined') return ''
-  let id = localStorage.getItem(CLAVE_DISPOSITIVO)
-  if (!id) {
-    id = crypto.randomUUID()
-    localStorage.setItem(CLAVE_DISPOSITIVO, id)
-  }
-  return id
-}
-
-/**
  * Pide al navegador que no descarte este almacenamiento.
  *
  * Por defecto IndexedDB es "best effort": ante presión de espacio el navegador
@@ -172,7 +153,7 @@ export function obtenerIdDispositivo(): string {
  * Cada navegador decide distinto: Chrome lo concede solo si la aplicación está
  * instalada o tiene uso frecuente, Firefox pregunta al usuario y Safari lo
  * ignora en buena medida. Por eso devuelve el resultado en vez de darlo por
- * hecho — el panel de Sincronización lo muestra tal cual.
+ * hecho.
  */
 export async function solicitarAlmacenamientoPersistente(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false
@@ -183,26 +164,6 @@ export async function solicitarAlmacenamientoPersistente(): Promise<boolean> {
     return await navigator.storage.persist()
   } catch {
     return false
-  }
-}
-
-export async function almacenamientoEsPersistente(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.storage?.persisted) return false
-  try {
-    return await navigator.storage.persisted()
-  } catch {
-    return false
-  }
-}
-
-/** Espacio usado y disponible, para el diagnóstico. */
-export async function usoDeAlmacenamiento(): Promise<{ usado: number; total: number } | null> {
-  if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return null
-  try {
-    const { usage, quota } = await navigator.storage.estimate()
-    return { usado: usage ?? 0, total: quota ?? 0 }
-  } catch {
-    return null
   }
 }
 
