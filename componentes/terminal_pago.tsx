@@ -38,15 +38,15 @@ interface Props {
 
 /** Dónde está la tarjeta en cada fase, en unidades del viewBox. */
 const POSICION_TARJETA: Record<Fase, string> = {
-  fuera: 'translate(400px, 250px) rotate(14deg)',
-  reposo: 'translate(188px, 250px) rotate(14deg)',
-  leyendo: 'translate(105px, 38px) rotate(0deg)',
-  verificando: 'translate(105px, 38px) rotate(0deg)',
-  final: 'translate(105px, 520px) rotate(0deg)',
+  fuera: 'translate(400px, 195px) rotate(14deg)',
+  reposo: 'translate(190px, 195px) rotate(14deg)',
+  leyendo: 'translate(105px, 11px) rotate(0deg)',
+  verificando: 'translate(105px, 11px) rotate(0deg)',
+  final: 'translate(105px, 460px) rotate(0deg)',
 }
 
 const ESTILOS = `
-.pos-tarjeta { transition: transform .6s cubic-bezier(.2,.8,.2,1); transform-box: fill-box; transform-origin: center; }
+.pos-tarjeta { transition: transform .6s cubic-bezier(.2,.8,.2,1), opacity .5s; transform-box: fill-box; transform-origin: center; }
 .pos-onda { transform-box: fill-box; transform-origin: center; opacity: 0; animation: pos-onda 1.2s ease-out forwards; }
 .pos-giro { transform-box: fill-box; transform-origin: center; animation: pos-giro .9s linear infinite; }
 .pos-trazo { stroke-dasharray: 1; stroke-dashoffset: 1; animation: pos-trazo .45s ease-out forwards; }
@@ -127,7 +127,7 @@ export function TerminalPago({
           pantalla sin scroll, en cualquier teléfono. */}
       <div className="relative w-full min-h-0 flex-1">
       <svg
-        viewBox="0 0 360 490"
+        viewBox="0 0 360 390"
         className="absolute inset-0 h-full w-full"
         role="img"
         aria-label={ok ? 'Terminal: pago aprobado' : error ? 'Terminal: pago rechazado' : 'Terminal: verificando el pago'}
@@ -149,18 +149,18 @@ export function TerminalPago({
             <rect width="150" height="94" rx="10" />
           </clipPath>
           <clipPath id="pos-pantalla">
-            <rect x="96" y="120" width="168" height="120" rx="10" />
+            <rect x="96" y="82" width="168" height="120" rx="10" />
           </clipPath>
         </defs>
 
         {/* Terminal */}
         <g className={cn(error && 'pos-temblor')}>
           <rect
-            x="90"
-            y="40"
-            width="180"
-            height="410"
-            rx="28"
+            x="75"
+            y="30"
+            width="210"
+            height="330"
+            rx="24"
             fill="url(#pos-cuerpo)"
             stroke={colorEstado ?? 'rgba(255,255,255,.14)'}
             strokeWidth={colorEstado ? 3 : 1.5}
@@ -170,17 +170,17 @@ export function TerminalPago({
           {/* Lector contactless */}
           <g stroke="rgba(255,255,255,.55)" strokeWidth="3.5" strokeLinecap="round" fill="none">
             {[8, 15, 22].map((r) => (
-              <path key={r} d={arco(170, 82, r)} />
+              <path key={r} d={arco(170, 58, r)} />
             ))}
           </g>
 
           {/* Pantalla */}
-          <rect x="96" y="120" width="168" height="120" rx="10" fill="#0d1214" stroke="rgba(255,255,255,.08)" />
+          <rect x="96" y="82" width="168" height="120" rx="10" fill="#0d1214" stroke="rgba(255,255,255,.08)" />
           <g clipPath="url(#pos-pantalla)">
             <rect
               className="pos-tinte"
               x="96"
-              y="120"
+              y="82"
               width="168"
               height="120"
               fill={colorEstado ?? 'transparent'}
@@ -190,18 +190,18 @@ export function TerminalPago({
             {(fase === 'fuera' || fase === 'reposo' || fase === 'leyendo') && (
               <g stroke="#fff" strokeWidth="6" strokeLinecap="round" fill="none">
                 {[10, 21, 32, 43].map((r, i) => (
-                  <path key={r} d={arco(160, 180, r)} opacity={1 - i * 0.25} />
+                  <path key={r} d={arco(160, 142, r)} opacity={1 - i * 0.25} />
                 ))}
               </g>
             )}
 
             {fase === 'verificando' && (
               <g>
-                <circle cx="180" cy="168" r="18" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="4" />
+                <circle cx="180" cy="130" r="18" fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="4" />
                 <circle
                   className="pos-giro"
                   cx="180"
-                  cy="168"
+                  cy="130"
                   r="18"
                   fill="none"
                   stroke="#fff"
@@ -209,7 +209,7 @@ export function TerminalPago({
                   strokeLinecap="round"
                   strokeDasharray="30 84"
                 />
-                <text x="180" y="218" textAnchor="middle" fill="#fff" fontSize="14" fontWeight="600">
+                <text x="180" y="180" textAnchor="middle" fill="#fff" fontSize="14" fontWeight="600">
                   Verificando…
                 </text>
               </g>
@@ -217,18 +217,18 @@ export function TerminalPago({
 
             {(ok || error) && (
               <g stroke={colorEstado!} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <circle className="pos-trazo" cx="180" cy="166" r="26" pathLength={1} />
+                <circle className="pos-trazo" cx="180" cy="128" r="26" pathLength={1} />
                 {ok ? (
-                  <path className="pos-trazo" d="M 168 167 L 177 176 L 194 158" pathLength={1} style={{ animationDelay: '.35s' }} />
+                  <path className="pos-trazo" d="M 168 129 L 177 138 L 194 120" pathLength={1} style={{ animationDelay: '.35s' }} />
                 ) : (
                   <>
-                    <path className="pos-trazo" d="M 170 156 L 190 176" pathLength={1} style={{ animationDelay: '.35s' }} />
-                    <path className="pos-trazo" d="M 190 156 L 170 176" pathLength={1} style={{ animationDelay: '.5s' }} />
+                    <path className="pos-trazo" d="M 170 118 L 190 138" pathLength={1} style={{ animationDelay: '.35s' }} />
+                    <path className="pos-trazo" d="M 190 118 L 170 138" pathLength={1} style={{ animationDelay: '.5s' }} />
                   </>
                 )}
                 <text
                   x="180"
-                  y="220"
+                  y="182"
                   textAnchor="middle"
                   fill={colorEstado!}
                   stroke="none"
@@ -249,11 +249,11 @@ export function TerminalPago({
             return (
               <rect
                 key={i}
-                x={102 + col * 56}
-                y={264 + fila * 42}
-                width="44"
-                height="32"
-                rx="8"
+                x={92 + col * 62}
+                y={216 + fila * 34}
+                width="52"
+                height="26"
+                rx="7"
                 fill={color}
                 stroke="rgba(255,255,255,.07)"
               />
@@ -268,7 +268,7 @@ export function TerminalPago({
               key={retraso}
               className="pos-onda"
               cx="180"
-              cy="85"
+              cy="58"
               r="40"
               fill="none"
               stroke="#e6a52a"
@@ -278,7 +278,13 @@ export function TerminalPago({
           ))}
 
         {/* Tarjeta */}
-        <g className="pos-tarjeta" style={{ transform: POSICION_TARJETA[fase] }} filter="url(#pos-sombra)">
+        {/* Se desvanece fuera de escena: el SVG se estira más que su viewBox y en
+            ese margen sobrante la tarjeta se vería entrando o saliendo. */}
+        <g
+          className="pos-tarjeta"
+          style={{ transform: POSICION_TARJETA[fase], opacity: fase === 'fuera' || fase === 'final' ? 0 : 1 }}
+          filter="url(#pos-sombra)"
+        >
           <rect width="150" height="94" rx="10" fill="url(#pos-oro)" />
           <g clipPath="url(#pos-tarjeta-borde)">
             <circle cx="128" cy="14" r="34" fill="#fff" opacity=".14" />

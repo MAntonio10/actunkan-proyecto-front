@@ -250,7 +250,7 @@ function TicketEmitidoRender({
                   : 'uppercase tracking-wider text-muted-foreground'
               }`}
             >
-              {tienePagoPendiente ? '⚠️ Inactivo hasta confirmar pago' : 'Escanee para validar ticket'}
+              {tienePagoPendiente ? 'Inactivo hasta confirmar pago' : 'Escanee para validar ticket'}
             </span>
           </>
         ) : (
