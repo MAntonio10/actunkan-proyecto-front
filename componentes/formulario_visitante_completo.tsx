@@ -137,6 +137,14 @@ interface Props {
   onCatalogosCargados?: (catalogos: CatalogosTickets) => void;
 }
 
+/** 45 -> "45 min", 120 -> "2 h", 90 -> "1 h 30 min". */
+function formatearDuracion(minutos: number) {
+  const h = Math.floor(minutos / 60);
+  const m = minutos % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
 export function FormularioVisitanteCompleto({
   onDatosChange,
   onTicketEmitido,
@@ -173,6 +181,7 @@ export function FormularioVisitanteCompleto({
   const [modoEdicionPrecios, setModoEdicionPrecios] = useState(false);
   const [preciosEditados, setPreciosEditados] = useState<Record<number, string>>({});
   const [precioGuiaEditado, setPrecioGuiaEditado] = useState<string>("");
+  const [duracionesEditadas, setDuracionesEditadas] = useState<Record<number, string>>({});
   const [guardandoPrecios, setGuardandoPrecios] = useState(false);
 
   // Guía acompañante
@@ -373,6 +382,10 @@ export function FormularioVisitanteCompleto({
   );
 
   const precioTicketGuia = catalogos ? parseFloat(catalogos.precioTicketGuia) : 0;
+  const duracionDe = (idTipoRecorrido: number) =>
+    catalogos?.duracionesRecorrido?.find(
+      (d) => d.idAtraccion === idAtraccion && d.idTipoRecorrido === idTipoRecorrido,
+    )?.minutos;
 
   const datosGuiaCalculados = useMemo<DatosGuiaPreview>(() => {
     if (modoGuia === "sin_guia") {
@@ -510,6 +523,9 @@ export function FormularioVisitanteCompleto({
     });
     setPreciosEditados(iniciales);
     setPrecioGuiaEditado(String(precioTicketGuia));
+    setDuracionesEditadas(
+      Object.fromEntries((catalogos?.tiposRecorrido ?? []).map((t) => [t.id, String(duracionDe(t.id) ?? "")])),
+    );
     setModoEdicionPrecios(true);
   };
 
@@ -533,6 +549,16 @@ export function FormularioVisitanteCompleto({
     if (invalido) {
       toast.error("Tarifa no válida", {
         description: "No se permite guardar precios en Q0.00 o vacíos.",
+      });
+      return;
+    }
+    const duracionInvalida = Object.values(duracionesEditadas).some((v) => {
+      const n = Number(v);
+      return v !== "" && (!Number.isInteger(n) || n < 1 || n > 1440);
+    });
+    if (duracionInvalida) {
+      toast.error("Duración no válida", {
+        description: "El tiempo del recorrido va en minutos enteros, entre 1 y 1440.",
       });
       return;
     }
@@ -563,6 +589,19 @@ export function FormularioVisitanteCompleto({
 
       if (precioGuiaNum !== precioTicketGuia) {
         cambios.push(api.tarifas.actualizarTarifaGuia(precioGuiaNum) as Promise<never>);
+      }
+
+      // Vacío = sin definir; solo se envía lo que cambió.
+      for (const [idTipo, valor] of Object.entries(duracionesEditadas)) {
+        if (valor !== "" && Number(valor) !== duracionDe(Number(idTipo))) {
+          cambios.push(
+            api.tarifas.actualizarDuracionRecorrido({
+              idAtraccion,
+              idTipoRecorrido: Number(idTipo),
+              minutos: Number(valor),
+            }) as Promise<never>,
+          );
+        }
       }
 
       if (cambios.length === 0) {
@@ -1330,6 +1369,29 @@ export function FormularioVisitanteCompleto({
                     )}
                   >
                     <span className="font-medium">{t.nombre}</span>
+                    {modoEdicionPrecios ? (
+                      <div className="flex items-center gap-1 self-start bg-background border-2 border-emerald-500/60 rounded-md px-2 h-8 shadow-sm">
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={1440}
+                          step={1}
+                          placeholder="—"
+                          aria-label={`Minutos de ${t.nombre} en ${atraccionActual?.nombre ?? "la atracción"}`}
+                          value={duracionesEditadas[t.id] ?? ""}
+                          onChange={(e) =>
+                            setDuracionesEditadas((prev) => ({ ...prev, [t.id]: e.target.value }))
+                          }
+                          className="w-14 h-6 p-0 border-none bg-transparent text-sm font-bold text-center text-foreground focus-visible:ring-0"
+                        />
+                        <span className="text-xs text-muted-foreground">min</span>
+                      </div>
+                    ) : (
+                      duracionDe(t.id) !== undefined && (
+                        <span className="text-xs font-normal">~{formatearDuracion(duracionDe(t.id)!)}</span>
+                      )
+                    )}
                   </Label>
                 </div>
               ))}

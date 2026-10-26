@@ -914,6 +914,13 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ precio }),
       }),
+
+    // Duración de un tipo de recorrido en una atracción (crea o reemplaza).
+    actualizarDuracionRecorrido: (data: { idAtraccion: number; idTipoRecorrido: number; minutos: number }) =>
+      request<{ minutos: number }>('/tarifas/duracion-recorrido', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 
   // 11. Cajas (apertura, arqueo y cierre)

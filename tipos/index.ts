@@ -1083,6 +1083,8 @@ export interface CatalogosTickets {
   guias: GuiaCatalogo[]
   tarifas: TarifaBackend[]
   precioTicketGuia: string
+  // Opcional: un catálogo guardado sin conexión antes de que existiera no lo trae.
+  duracionesRecorrido?: { idAtraccion: number; idTipoRecorrido: number; minutos: number }[]
 }
 
 export interface VisitantePorTicket {
