@@ -143,7 +143,9 @@ export function FormularioVisitanteCompleto({
   onCatalogosCargados,
 }: Props) {
   const [catalogos, setCatalogos] = useState<CatalogosTickets | null>(null);
-  const { usuario } = useAutenticacion();
+  const { usuario, puedeAccion } = useAutenticacion();
+  // Lo mismo que exige PATCH /tarifas en el backend.
+  const puedeEditarPrecios = puedeAccion("EmisionTickets", "Editar");
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
   // Tarjeta fija y no notificación: el aviso pasaba en unos segundos y el
@@ -511,6 +513,14 @@ export function FormularioVisitanteCompleto({
     setModoEdicionPrecios(true);
   };
 
+  // Los precios en edición son de la atracción y el origen elegidos. Sin esto, al
+  // cambiarlos seguían los de la combinación anterior, y guardar los escribía en
+  // la nueva.
+  useEffect(() => {
+    if (modoEdicionPrecios) entrarModoEdicionPrecios();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idAtraccion, idOrigen]);
+
   const handleGuardarPrecios = async () => {
     if (!idAtraccion || !idOrigen) return;
 
@@ -813,7 +823,7 @@ export function FormularioVisitanteCompleto({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {!modoEdicionPrecios ? (
+          {!puedeEditarPrecios ? null : !modoEdicionPrecios ? (
             <Button
               type="button"
               variant="outline"
