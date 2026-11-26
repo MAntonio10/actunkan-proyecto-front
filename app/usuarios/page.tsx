@@ -93,6 +93,10 @@ import {
 import { formatearFechaApi } from '@/lib/fecha_guatemala'
 import { generarContrasena, hayAzarSeguro, LARGO_CONTRASENA } from '@/lib/generar_contrasena'
 
+/** Interruptor más grande para pantallas táctiles: el de shadcn mide 32×18 px. */
+const SWITCH_TACTIL =
+  'h-6 w-10 [&_[data-slot=switch-thumb]]:size-5'
+
 // --- ESQUEMAS ZOD ---
 const esquemaCrearUsuario = z.object({
   nombre: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -1619,7 +1623,7 @@ export default function ModuloUsuariosHubPage() {
       {/* MODAL GESTIÓN DE PERMISOS POR USUARIO                        */}
       {/* ============================================================ */}
       <Dialog open={modalPermisosAbierto} onOpenChange={setModalPermisosAbierto}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl grid-cols-1">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Key className="h-5 w-5 text-amber-500" />
@@ -1635,12 +1639,12 @@ export default function ModuloUsuariosHubPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 min-w-0">
             <p className="text-xs text-muted-foreground">
               Active los permisos habilitados para este usuario en cada módulo. Al activar cualquier permiso diferente a &quot;Ver&quot;, se activará &quot;Ver&quot; automáticamente.
             </p>
 
-            <ScrollArea className="h-[380px] pr-3 border rounded-lg p-3 bg-muted/20">
+            <ScrollArea className="h-[min(380px,50dvh)] border rounded-lg p-2 sm:p-3 bg-muted/20 [&_[data-slot=scroll-area-viewport]>div]:!block">
               {modulos.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full py-12 gap-2 text-muted-foreground text-xs">
                   <Spinner className="h-5 w-5 text-primary" />
@@ -1669,7 +1673,7 @@ export default function ModuloUsuariosHubPage() {
 
                       return (
                         <div key={mod.id} className="rounded-lg border border-border/60 bg-card p-3 space-y-3">
-                          <div className="flex items-start justify-between gap-3 border-b border-border/40 pb-2">
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 border-b border-border/40 pb-2">
                             <div className="flex flex-col gap-0.5 min-w-0">
                               <div className="flex items-center gap-2">
                                 <Shield className="h-4 w-4 text-primary shrink-0" />
@@ -1688,19 +1692,18 @@ export default function ModuloUsuariosHubPage() {
                             </div>
 
                             {asociacionesModulo.length > 0 && (
-                              <div className="flex items-center gap-2">
-                                <Label
-                                  htmlFor={`select-all-${mod.id}`}
-                                  className="text-xs text-muted-foreground cursor-pointer select-none font-medium"
-                                >
-                                  Seleccionar todos
-                                </Label>
+                              <Label
+                                htmlFor={`select-all-${mod.id}`}
+                                className="flex items-center justify-between sm:justify-end gap-3 min-h-11 shrink-0 text-xs text-muted-foreground cursor-pointer select-none font-medium"
+                              >
+                                Seleccionar todos
                                 <Switch
                                   id={`select-all-${mod.id}`}
                                   checked={todosSeleccionados}
                                   onCheckedChange={(checked) => toggleTodosModulo(mod.id, checked)}
+                                  className={SWITCH_TACTIL}
                                 />
-                              </div>
+                              </Label>
                             )}
                           </div>
 
@@ -1716,9 +1719,10 @@ export default function ModuloUsuariosHubPage() {
                                 const nombreAccion = ma.accion?.nombre || `Acción ${ma.idAccion}`
 
                                 return (
-                                  <div
+                                  <label
                                     key={ma.id}
-                                    className={`flex items-start justify-between gap-3 p-2.5 rounded-md border text-xs transition-colors ${
+                                    htmlFor={`permiso-${ma.id}`}
+                                    className={`flex items-center justify-between gap-3 p-3 min-h-14 rounded-md border text-xs transition-colors cursor-pointer select-none ${
                                       isChecked
                                         ? 'bg-primary/10 border-primary/40 font-medium text-foreground'
                                         : 'bg-muted/30 border-border/60 text-muted-foreground hover:bg-muted/50'
@@ -1738,10 +1742,12 @@ export default function ModuloUsuariosHubPage() {
                                       </span>
                                     </div>
                                     <Switch
+                                      id={`permiso-${ma.id}`}
                                       checked={isChecked}
                                       onCheckedChange={(checked) => togglePermiso(ma, checked)}
+                                      className={SWITCH_TACTIL}
                                     />
-                                  </div>
+                                  </label>
                                 )
                               })}
                             </div>
@@ -1755,10 +1761,10 @@ export default function ModuloUsuariosHubPage() {
           </div>
 
           <DialogFooter className="pt-2">
-            <Button type="button" variant="outline" onClick={() => setModalPermisosAbierto(false)}>
+            <Button type="button" variant="outline" className="h-11 sm:h-9" onClick={() => setModalPermisosAbierto(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleGuardarPermisos} disabled={guardandoPermisos}>
+            <Button className="h-11 sm:h-9" onClick={handleGuardarPermisos} disabled={guardandoPermisos}>
               {guardandoPermisos ? (
                 <>
                   <Spinner className="mr-2 h-4 w-4" />
