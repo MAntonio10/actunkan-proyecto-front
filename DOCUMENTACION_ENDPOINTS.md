@@ -162,6 +162,18 @@ Aquí decía que `Donaciones`, `Sincronizacion`, `Reportes` y `ActividadesParque
 - **Trazabilidad:** cada gasto guarda `idUsuario` (quién lo registró), además del registro en Bitácora.
 - **Configuración requerida tras desplegar:** ejecutar `npx ts-node prisma/seed-modulos-dinero.ts` para registrar el módulo general `'Cajas'` y su sub-módulo `'Gastos'` con sus acciones (script aditivo e idempotente). Después, otorgar los permisos a cada usuario con `POST /usuarios/:id/permisos`.
 
+## Novedades en Tickets (recorridos, folios por serie y configuración)
+- **Biblioteca Ambiental:** la atracción `mariposario` se llama ahora *Biblioteca Ambiental* (el `codigo` no cambia). El seed renombra la fila una sola vez.
+- **Recorrido solo en las cuevas:** `idTipoRecorrido` es opcional en `POST /tickets/emitir` (y en la venta offline). Es obligatorio cuando la atracción es `cuevas`; en las demás se ignora y el ticket queda con `tipoRecorrido: null`.
+- **Precio por recorrido:** `PATCH /tarifas` acepta `idTipoRecorrido` opcional. Al cobrar gana la tarifa del recorrido; si no existe, rige la general (sin recorrido). `GET /tickets/catalogos` trae `idTipoRecorrido` en cada tarifa (`null` = general). Seed: adulto cuevas Nacional corto Q25 / largo Q35, Extranjero corto Q35 / largo Q45.
+- **Folios de las cuevas por serie:** el ticket de visitante en las cuevas se numera `ERC-0001`, `ERL-0001`, `NRC-0001`, `NRL-0001` (Extranjero/Nacional + Recorrido Corto/Largo), cada serie con su contador y sin reinicio anual. La Biblioteca Ambiental y el ticket de guía siguen con `TCK-AAAA-NNNNNN`.
+- **Venta offline con nomenclatura oficial.** La taquilla imprime sin conexión el número oficial que le sigue (`ERC-0005`, `TCK-2026-000045`), calculado con `correlativos` (último número por serie) que devuelve `POST /dispositivos`. Al sincronizar, el servidor **decide el número real**: si el impreso sigue libre lo respeta; si otro equipo ya lo usó, le asigna el siguiente libre. Nunca da un número menor o igual al último emitido (ni al inicio fijado en Configuración) ni uno más de 1000 por delante. Lo impreso queda en `folioDispositivo` (interno, no se muestra): es lo que lleva el QR, y `POST /tickets/validar` busca el pase de taquilla por `dispositivo` + ese número, porque dos equipos pueden haber impreso el mismo. El folio viejo `TCK-D01-AAAA-NNNNNN` se rechaza con `FOLIO_DE_OTRA_SERIE`. El modo por lotes (heredado) conserva su folio.
+- **`GET /tickets/por-qr?numeroTicket=…&dispositivo=…`** (`EmisionTickets` / `Ver`): el ticket real detrás de un QR (mismo cuerpo que `GET /tickets/:id`). Con `dispositivo` busca lo que imprimió esa taquilla, aunque el servidor le haya dado otro número; sin él, busca por número oficial. `404` si no existe (o si la venta sin conexión aún no sube).
+- **`secuencia`** (entero opcional en cada venta de `POST /tickets/emitir-offline` y en cada descarte): conteo propio de la taquilla (1, 2, 3…), el del guía es `secuencia + 1`. No se imprime; alimenta `ultimoCorrelativo` / `foliosSinRendir`, que ya no pueden leerse del número impreso.
+- **Configuración (`/configuracion`, módulo `Configuracion`):**
+  - `GET /configuracion/correlativos` (`Ver`): `[{ serie, ultimoNumero, siguiente }]`.
+  - `PATCH /configuracion/correlativos` (`Editar`): `{ serie: 'ERC'|'ERL'|'NRC'|'NRL', inicio }`. `inicio` es el número del próximo ticket y debe ser `>= siguiente`; un número menor responde `400` (repetiría folios).
+
 ## Novedades en Tickets
 - **Módulo de emisión completo:** `/tickets` (catálogos, emisión, historial con métricas y validación de QR en taquilla) y `/tarifas` con vigencia histórica.
 - **Sin CRUD por catálogo:** atracciones, orígenes, países, tipos y formas de pago son datos de configuración que alimentan el formulario. Se leen todos con `GET /tickets/catalogos` y se administran por seed.
@@ -1514,7 +1526,7 @@ Editar un precio **no sobrescribe** la fila: cierra la vigencia de la tarifa act
 | GET | `/tarifas` | `EmisionTickets` / `Ver` | Tarifas vigentes (atracción + origen + categoría). Arreglo plano, **no** paginado |
 | GET | `/tarifas/historico` | `EmisionTickets` / `Ver` | Historial **paginado** (`{ datos, total, pagina, limite }`). Filtros: `idAtraccion`, `idOrigen`, `pagina`, `limite` (máx. 200) |
 | GET | `/tarifas/guia` | `EmisionTickets` / `Ver` | Tarifa vigente del ticket de guía sin carnet |
-| PATCH | `/tarifas` | `EmisionTickets` / `Editar` | `{ idAtraccion, idOrigen, idTipoVisitante, precio }` |
+| PATCH | `/tarifas` | `EmisionTickets` / `Editar` | `{ idAtraccion, idOrigen, idTipoVisitante, idTipoRecorrido?, precio }`. Sin `idTipoRecorrido` = tarifa general |
 | PATCH | `/tarifas/guia` | `EmisionTickets` / `Editar` | `{ precio }` |
 | PATCH | `/tarifas/duracion-recorrido` | `EmisionTickets` / `Editar` | `{ idAtraccion, idTipoRecorrido, minutos }` (1–1440). Crea o reemplaza la duración de ese recorrido en esa atracción |
 
@@ -1723,6 +1735,7 @@ Todo lo que va después de `montoCobrado` es el payload de `POST /tickets/emitir
 | `idLocal` | **UUID de 36 caracteres**, generado por el dispositivo. Es la clave de idempotencia |
 | `numeroTicket` | Folio reservado que el dispositivo ya imprimió |
 | `numeroTicketGuia` | Segundo folio, solo si la venta lleva guía sin carnet |
+| `secuencia` | Opcional. Conteo propio de la taquilla del folio del visitante (el del guía es el siguiente). No se imprime |
 | `fechaEmision` | ISO 8601. Momento real de la venta |
 | `montoCobrado` | **Texto**, no número: evita perder centavos en el punto flotante de JSON |
 

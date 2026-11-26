@@ -58,6 +58,7 @@ import { SelectorGuia } from "./selector_guia";
 
 import {
   type CatalogosTickets,
+  type TarifaBackend,
   type CatalogoCodificado,
   type PayloadEmisionTicket,
   type RespuestaEmisionTicket,
@@ -84,6 +85,8 @@ const COLOR_ATRACCION: Record<string, string> = {
 };
 
 const CODIGO_EXTRANJERO = "extranjero";
+/** El recorrido corto/largo solo existe en las cuevas. */
+const CODIGO_CUEVAS = "cuevas";
 const CODIGO_NINO_MENOR = "nino_menor";
 const CODIGO_VISITANTE_ESPECIAL = "visitante_especial";
 
@@ -173,6 +176,8 @@ export function FormularioVisitanteCompleto({
   const [idOpcionPago, setIdOpcionPago] = useState<number | null>(null);
   const [idOpcionPagoGuia, setIdOpcionPagoGuia] = useState<number | null>(null);
   const [cantidades, setCantidades] = useState<Record<number, number>>({});
+  /** Efectivo que entrega el cliente, para calcular el cambio. */
+  const [montoRecibido, setMontoRecibido] = useState("");
 
   const [paisPopoverAbierto, setPaisPopoverAbierto] = useState(false);
   const [busquedaPais, setBusquedaPais] = useState("");
@@ -249,7 +254,7 @@ export function FormularioVisitanteCompleto({
       setIdAtraccion(
         (prev) =>
           prev ??
-          res.atracciones.find((a) => a.codigo === "cuevas")?.id ??
+          res.atracciones.find((a) => a.codigo === CODIGO_CUEVAS)?.id ??
           res.atracciones[0]?.id ??
           null,
       );
@@ -340,7 +345,11 @@ export function FormularioVisitanteCompleto({
 
   const atraccionActual = catalogos?.atracciones.find((a) => a.id === idAtraccion);
   const origenActual = catalogos?.origenes.find((o) => o.id === idOrigen);
-  const tipoRecorridoActual = catalogos?.tiposRecorrido.find((t) => t.id === idTipoRecorrido);
+  const requiereRecorrido = atraccionActual?.codigo === CODIGO_CUEVAS;
+  // Fuera de las cuevas no hay recorrido: ni precio, ni ticket, ni payload lo llevan.
+  const tipoRecorridoActual = requiereRecorrido
+    ? catalogos?.tiposRecorrido.find((t) => t.id === idTipoRecorrido)
+    : undefined;
   const opcionPagoActual = catalogos?.opcionesPago.find((o) => o.id === idOpcionPago);
   const opcionPagoGuiaActual = catalogos?.opcionesPago.find((o) => o.id === idOpcionPagoGuia);
   const esExtranjero = origenActual?.codigo === CODIGO_EXTRANJERO;
@@ -365,20 +374,25 @@ export function FormularioVisitanteCompleto({
     );
   }, [catalogos, esExtranjero]);
 
+  const idRecorridoVigente = tipoRecorridoActual?.id ?? null;
+
   // Precio unitario vigente. El servidor vuelve a resolverlo al emitir: esto es
   // solo para mostrarle el total al usuario antes de confirmar.
   const precioDe = useCallback(
     (tipo: CatalogoCodificado): number => {
       if (esCodigoGratuito(tipo.codigo)) return 0;
-      const tarifa = catalogos?.tarifas.find(
-        (t) =>
-          t.idAtraccion === idAtraccion &&
-          t.idOrigen === idOrigen &&
-          t.idTipoVisitante === tipo.id,
-      );
+      const deLaCombinacion = (t: TarifaBackend) =>
+        t.idAtraccion === idAtraccion && t.idOrigen === idOrigen && t.idTipoVisitante === tipo.id;
+      // Igual que el backend: la del recorrido gana, si no rige la general.
+      const tarifa =
+        (idRecorridoVigente &&
+          catalogos?.tarifas.find(
+            (t) => deLaCombinacion(t) && t.idTipoRecorrido === idRecorridoVigente,
+          )) ||
+        catalogos?.tarifas.find((t) => deLaCombinacion(t) && !t.idTipoRecorrido);
       return tarifa ? parseFloat(tarifa.precio) : 0;
     },
-    [catalogos, idAtraccion, idOrigen],
+    [catalogos, idAtraccion, idOrigen, idRecorridoVigente],
   );
 
   const precioTicketGuia = catalogos ? parseFloat(catalogos.precioTicketGuia) : 0;
@@ -451,6 +465,18 @@ export function FormularioVisitanteCompleto({
     origenActual,
     tipoRecorridoActual,
   ]);
+
+  // Lo que se cobra en efectivo ahora: el visitante y/o el guía, según su forma de pago.
+  const montoEfectivo =
+    (opcionPagoActual?.esEfectivo ? calculos.subtotalVisitantes : 0) +
+    (datosGuiaCalculados.requiereTicketSeparado && opcionPagoGuiaActual?.esEfectivo
+      ? calculos.montoGuiaIndependiente
+      : 0);
+  const recibidoNum = parseFloat(montoRecibido);
+  // En centavos para no arrastrar errores de coma flotante al dar cambio.
+  const cambio = Number.isFinite(recibidoNum)
+    ? (Math.round(recibidoNum * 100) - Math.round(montoEfectivo * 100)) / 100
+    : null;
 
   useEffect(() => {
     onDatosChange?.({
@@ -535,7 +561,7 @@ export function FormularioVisitanteCompleto({
   useEffect(() => {
     if (modoEdicionPrecios) entrarModoEdicionPrecios();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idAtraccion, idOrigen]);
+  }, [idAtraccion, idOrigen, idRecorridoVigente]);
 
   const handleGuardarPrecios = async () => {
     if (!idAtraccion || !idOrigen) return;
@@ -583,6 +609,8 @@ export function FormularioVisitanteCompleto({
             idAtraccion,
             idOrigen,
             idTipoVisitante: Number(idTipo),
+            // En las cuevas el precio es del recorrido elegido.
+            idTipoRecorrido: idRecorridoVigente ?? undefined,
             precio: parseFloat(valor),
           }),
         );
@@ -626,7 +654,7 @@ export function FormularioVisitanteCompleto({
 
 
   const onSubmit = async (datos: FormValues) => {
-    if (!idAtraccion || !idOrigen || !idTipoRecorrido || !idOpcionPago) {
+    if (!idAtraccion || !idOrigen || (requiereRecorrido && !idRecorridoVigente) || !idOpcionPago) {
       toast.error("Faltan datos del catálogo", {
         description: "Recargue la página para volver a cargar los catálogos.",
       });
@@ -677,7 +705,7 @@ export function FormularioVisitanteCompleto({
       idAtraccion,
       idOrigen,
       idPais: esExtranjero ? idPais : null,
-      idTipoRecorrido,
+      idTipoRecorrido: idRecorridoVigente ?? undefined,
       cantidades: Object.entries(cantidades)
         .filter(([, cantidad]) => cantidad > 0)
         .map(([idTipoVisitante, cantidad]) => ({
@@ -775,6 +803,7 @@ export function FormularioVisitanteCompleto({
       setErrorPais(null);
       setErrorCantidades(null);
       setSinCaja(false);
+      setMontoRecibido("");
     } catch (err: unknown) {
       const mensaje = err instanceof Error ? err.message : "No se pudo emitir el ticket";
 
@@ -855,7 +884,8 @@ export function FormularioVisitanteCompleto({
             {modoEdicionPrecios && (
               <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-1">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Edición de Tarifas ({atraccionActual?.nombre} · {origenActual?.nombre})
+                Edición de Tarifas ({atraccionActual?.nombre} · {origenActual?.nombre}
+                {tipoRecorridoActual ? ` · ${tipoRecorridoActual.nombre}` : ""})
               </span>
             )}
           </div>
@@ -1342,7 +1372,8 @@ export function FormularioVisitanteCompleto({
             {errorCantidades && <p className="text-sm text-destructive">{errorCantidades}</p>}
           </div>
 
-          {/* Tipo de recorrido */}
+          {/* Tipo de recorrido: exclusivo del acceso a las cuevas */}
+          {requiereRecorrido && (
           <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wider text-muted-foreground">
               Tipo de Recorrido
@@ -1397,6 +1428,7 @@ export function FormularioVisitanteCompleto({
               ))}
             </RadioGroup>
           </div>
+          )}
 
           {/* Forma de Pago */}
           <div className="space-y-2">
@@ -1680,6 +1712,56 @@ export function FormularioVisitanteCompleto({
               El monto final lo confirma el servidor al emitir el ticket.
             </p>
           </div>
+
+          {/* Calculadora de cambio: solo cuando hay algo que cobrar en efectivo */}
+          {montoEfectivo > 0 && (
+            <div className="rounded-lg border border-emerald-500/40 p-3 space-y-2">
+              <Label
+                htmlFor="monto-recibido"
+                className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 font-semibold"
+              >
+                <Banknote className="h-4 w-4 text-emerald-500" />
+                Efectivo recibido (a cobrar Q{montoEfectivo.toFixed(2)})
+              </Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="monto-recibido"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={montoRecibido}
+                  onChange={(e) => setMontoRecibido(e.target.value)}
+                  className="w-32 h-10 text-base font-semibold tabular-nums"
+                />
+                {[50, 100, 200].map((billete) => (
+                  <Button
+                    key={billete}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setMontoRecibido(String(billete))}
+                    className="h-10 cursor-pointer"
+                  >
+                    Q{billete}
+                  </Button>
+                ))}
+              </div>
+              {cambio !== null && (
+                <p
+                  aria-live="polite"
+                  className={cn(
+                    "flex items-center justify-between text-sm font-semibold",
+                    cambio < 0 ? "text-destructive" : "text-emerald-600",
+                  )}
+                >
+                  <span>{cambio < 0 ? "Falta" : "Cambio a devolver"}</span>
+                  <span className="text-2xl tabular-nums">Q{Math.abs(cambio).toFixed(2)}</span>
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Envío */}
           <div className="space-y-1.5">

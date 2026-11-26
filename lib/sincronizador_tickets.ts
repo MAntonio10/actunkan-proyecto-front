@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { api, esErrorDeRed, hayConexion , ApiError } from '@/lib/api'
 import { db } from '@/lib/db_tickets'
 import { contextoOfflineActual, encolarDescartes } from '@/lib/emision_offline'
-import { identidadActual } from '@/lib/dispositivo_taquilla'
+import { identidadActual, registrarFoliosOficiales } from '@/lib/dispositivo_taquilla'
 import { llaveActual } from '@/lib/sesion_offline'
 import type { ResultadoVentaOffline, VentaPendienteLocal } from '@/tipos'
 
@@ -212,6 +212,9 @@ async function aplicarResultado(
   // CREADO o DUPLICADO_IGNORADO: en ambos casos el ticket existe en el backend.
   if (resultado.ticket) {
     await db.ticketsLocales.put(resultado.ticket)
+    // Si el servidor le dio otro número (otro equipo ya usaba el impreso), los
+    // próximos pases de esta taquilla siguen desde ahí.
+    await registrarFoliosOficiales([resultado.ticket.numeroTicket])
   }
   await db.ventasPendientes.put({
     ...venta,
@@ -271,8 +274,8 @@ async function sincronizarUsosPendientes(): Promise<void> {
         await api.tickets.validar({
           numeroTicket,
           firma: folio?.firma,
-          // Redundante desde que el servidor deduce la taquilla del propio
-          // folio, pero explícito no cuesta nada y no depende de esa deducción.
+          // Obligatorio: el número impreso es de la serie oficial y otra taquilla
+          // pudo imprimir el mismo; el servidor busca el pase por equipo.
           dispositivo: fila.dispositivo,
         })
         sellado = true
@@ -529,9 +532,10 @@ async function declararDescartesPendientes(): Promise<void> {
       dispositivo: identidad.idDispositivo,
       idAperturaCaja: contexto.idAperturaCaja,
       descartes: pendientes.map(
-        ({ numeroTicket, firma, montoCobrado, fechaDescarte, tipo, motivo }) => ({
+        ({ numeroTicket, firma, montoCobrado, fechaDescarte, tipo, motivo, secuencia }) => ({
           numeroTicket,
           firma,
+          secuencia,
           montoCobrado,
           fechaDescarte,
           tipo,

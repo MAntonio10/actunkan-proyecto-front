@@ -21,6 +21,7 @@ import { BarraNavegacionSuperior } from '@/componentes/barra_navegacion_superior
 import { BotonRegresar } from '@/componentes/boton_regresar'
 import { RutaProtegida } from '@/componentes/ruta_protegida'
 import { EscanerQR } from '@/componentes/escaner_qr'
+import { leerQrPase } from '@/lib/leer_qr'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -189,7 +190,7 @@ export default function ValidarTicketPage() {
       // emitido offline todavía figura como folio reservado en el servidor, así
       // que preguntarle daría 404 y dejaría afuera a un visitante que ya pagó.
       if (esErrorDeRed(err)) {
-        const local = await validarSinConexion(numeroTicket)
+        const local = await validarSinConexion(numeroTicket, dispositivo)
         if (local.estado === 'desconocido') {
           setResultado({
             estado: 'error',
@@ -246,23 +247,7 @@ export default function ValidarTicketPage() {
       if (validando || texto === ultimoEscaneado.current) return
       ultimoEscaneado.current = texto
 
-      // El QR lleva el JSON { numeroTicket, firma } y, si lo firmó una taquilla
-      // con su propia llave, además { dispositivo }. El del servidor sigue
-      // viniendo sin ese campo, así que los pases ya impresos no cambian.
-      // Si viniera texto plano, se asume que es el folio.
-      let numeroTicket = texto
-      let firma: string | undefined
-      let dispositivo: string | undefined
-      try {
-        const datos = JSON.parse(texto)
-        if (datos?.numeroTicket) {
-          numeroTicket = datos.numeroTicket
-          firma = datos.firma
-          dispositivo = typeof datos.dispositivo === 'string' ? datos.dispositivo : undefined
-        }
-      } catch {
-        // No es JSON: se envía el contenido tal cual como folio
-      }
+      const { numeroTicket, firma, dispositivo } = leerQrPase(texto)
 
       setCamaraActiva(false)
       validar(numeroTicket, firma, dispositivo)
@@ -379,7 +364,7 @@ export default function ValidarTicketPage() {
                           que es el que sorprende al teclearlo. */}
                       <Input
                         id="folio"
-                        placeholder="Ej. TCK-D03-2026-000045"
+                        placeholder="Ej. ERC-0045"
                         value={folioManual}
                         onChange={(e) => setFolioManual(e.target.value)}
                         onKeyDown={(e) => {

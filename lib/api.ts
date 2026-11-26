@@ -20,6 +20,7 @@ import {
   TicketBackend,
   FiltrosTickets,
   TarifaBackend,
+  CorrelativoSerie,
   RespuestaHistorialTarifas,
   GuiaBackend,
   RespuestaGuias,
@@ -706,6 +707,13 @@ export const api = {
 
     getTicketById: (id: number) => request<TicketBackend>(`/tickets/${id}`),
 
+    // El ticket real detrás de un QR, aunque el papel diga otro número.
+    buscarPorQr: (numeroTicket: string, dispositivo?: string) => {
+      const query = new URLSearchParams({ numeroTicket })
+      if (dispositivo) query.append('dispositivo', dispositivo)
+      return request<TicketBackend>(`/tickets/por-qr?${query.toString()}`)
+    },
+
     // El backend arma el pase en PDF (Content-Disposition: inline) para
     // previsualizar, imprimir o descargar desde el visor del navegador.
     getPdf: (id: number) => solicitarBlob(`/tickets/${id}/pdf`),
@@ -902,6 +910,7 @@ export const api = {
       idAtraccion: number
       idOrigen: number
       idTipoVisitante: number
+      idTipoRecorrido?: number
       precio: number
     }) =>
       request<TarifaBackend>('/tarifas', {
@@ -918,6 +927,16 @@ export const api = {
     // Duración de un tipo de recorrido en una atracción (crea o reemplaza).
     actualizarDuracionRecorrido: (data: { idAtraccion: number; idTipoRecorrido: number; minutos: number }) =>
       request<{ minutos: number }>('/tarifas/duracion-recorrido', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  // Configuración: número desde el que sigue cada serie de folios de las cuevas.
+  configuracion: {
+    getCorrelativos: () => request<CorrelativoSerie[]>('/configuracion/correlativos'),
+    fijarCorrelativo: (data: { serie: CorrelativoSerie['serie']; inicio: number }) =>
+      request<CorrelativoSerie>('/configuracion/correlativos', {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),

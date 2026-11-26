@@ -1028,6 +1028,8 @@ export interface DispositivoTaquilla {
   /** Prefijo del folio de esta taquilla: 'D01', 'D02'... */
   serie: string
   ultimoCorrelativo: number
+  /** Último número oficial por serie: `{ ERC: 4, 'TCK-2026': 45 }`. */
+  correlativos?: Record<string, number>
   revocado: boolean
   /**
    * La caja del turno contra la que esta taquilla va a cuadrar.
@@ -1061,7 +1063,16 @@ export interface TarifaBackend {
   idAtraccion: number
   idOrigen: number
   idTipoVisitante: number
+  /** null = general de la atracción; con recorrido le gana a la general. */
+  idTipoRecorrido?: number | null
   precio: string
+}
+
+/** Contador de una serie de folios de las cuevas (`GET /configuracion/correlativos`). */
+export interface CorrelativoSerie {
+  serie: 'ERC' | 'ERL' | 'NRC' | 'NRL'
+  ultimoNumero: number
+  siguiente: number
 }
 
 /** Solo el histórico (`/tarifas/historico`) viene paginado; `/tarifas`, que
@@ -1116,7 +1127,7 @@ export interface TicketBackend {
   atraccion?: CatalogoCodificado
   origen?: CatalogoCodificado
   pais?: PaisCatalogo | null
-  tipoRecorrido?: CatalogoCodificado
+  tipoRecorrido?: CatalogoCodificado | null
   // El guía llega como objeto, no como campos planos, y viene poblado tanto en
   // el ticket del visitante como en el de tipo GUIA. Es null si no hubo guía.
   guia?: GuiaCatalogo | null
@@ -1196,7 +1207,8 @@ export interface PayloadEmisionTicket {
   idAtraccion: number
   idOrigen: number
   idPais: number | null
-  idTipoRecorrido: number
+  /** Solo en las cuevas; en las demás atracciones se omite. */
+  idTipoRecorrido?: number
   cantidades: { idTipoVisitante: number; cantidad: number }[]
   idOpcionPago: number
   notas?: string
@@ -1521,6 +1533,9 @@ export interface FolioReservado {
   numeroTicket: string
   firma: string
   qr: string
+  /** Conteo propio de la taquilla (1, 2, 3…). No se imprime: con él el servidor
+   *  detecta folios emitidos que nadie rindió. */
+  secuencia?: number
 }
 
 export type EstadoLoteOffline = 'ACTIVO' | 'CONCILIADO' | 'INVALIDADO'
@@ -1564,6 +1579,9 @@ export interface VentaOffline extends PayloadEmisionTicket {
   firma?: string
   /** Lo mismo para el segundo folio, el del guía sin carnet. */
   firmaGuia?: string
+  /** Conteo propio de la taquilla del folio del visitante; el del guía es el
+   *  siguiente. Ver `FolioReservado.secuencia`. */
+  secuencia?: number
 }
 // No agregue campos acá sin que existan en DOCUMENTACION_ENDPOINTS.md 18.3. El
 // ValidationPipe del backend usa `forbidNonWhitelisted`: un solo campo de más
@@ -1665,6 +1683,8 @@ export interface RespuestaConciliacionLote {
  */
 export interface DescarteOffline {
   numeroTicket: string
+  /** Conteo propio de la taquilla para ese folio. */
+  secuencia?: number
   /** La firma del propio folio. Sin ella cualquier taquilla podría declarar
    *  folios de otra y ensuciarle el cuadre. */
   firma: string

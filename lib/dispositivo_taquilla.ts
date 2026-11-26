@@ -53,8 +53,14 @@ export interface IdentidadDispositivo {
    * primer folio del año es `000001`.
    */
   ultimoCorrelativo: number
-  /** Año al que corresponde `ultimoCorrelativo`. Al cambiar de año se reinicia. */
+  /** Ya no se usa: el conteo propio es continuo. Se conserva en filas viejas. */
   anioCorrelativo: number
+  /**
+   * Último número oficial que conoce esta taquilla por serie:
+   * `{ ERC: 4, NRC: 10, 'TCK-2026': 45 }`. Con esto imprime sin conexión el que
+   * sigue. Se actualiza con lo que dice el servidor y con cada número que emite.
+   */
+  correlativos?: Record<string, number>
   /**
    * La taquilla fue dada de baja. Sus pases dejan de validar, así que no debe
    * seguir firmando: vuelve al modelo de folios reservados, que el servidor
@@ -137,9 +143,8 @@ export async function asegurarDispositivoRegistrado(
     llavePublica: identidad.llavePublica,
   })
 
-  const anio = anioEnGuatemala()
   const delServidor = dispositivo.ultimoCorrelativo ?? 0
-  const local = identidad.anioCorrelativo === anio ? identidad.ultimoCorrelativo : 0
+  const local = identidad.ultimoCorrelativo
 
   /*
    * El correlativo se queda con el MAYOR de los dos, nunca con el del servidor a
@@ -165,7 +170,9 @@ export async function asegurarDispositivoRegistrado(
     ...identidad,
     serie: dispositivo.serie,
     ultimoCorrelativo: Math.max(local, delServidor),
-    anioCorrelativo: anio,
+    // Igual que el conteo propio: el mayor de los dos. Lo local va adelante
+    // mientras haya ventas sin subir.
+    correlativos: fusionarCorrelativos(identidad.correlativos, dispositivo.correlativos),
     revocado: !!dispositivo.revocado,
   }
   await db.identidadDispositivo.put(confirmada)
@@ -226,51 +233,98 @@ async function generarIdentidadLocal(): Promise<IdentidadDispositivo> {
   return identidad
 }
 
-/** Prefijo de los folios. Lo fija el backend en `TICKET_SERIE`. */
+/** Prefijo de los folios fuera de las cuevas. Lo fija el backend en `TICKET_SERIE`. */
 const PREFIJO_FOLIO = 'TCK'
 
 /**
- * Arma el folio con el formato exacto que valida el servidor:
- * `TCK-{SERIE}-{AAAA}-{NNNNNN}`, con el correlativo a seis dígitos.
+ * Serie oficial de un ticket, la misma que usa el servidor:
+ * visitante de las cuevas → `ERC`/`ERL`/`NRC`/`NRL` (Extranjero/Nacional +
+ * Recorrido Corto/Largo); todo lo demás y el guía → `TCK-AAAA`.
  *
- * Cualquier otra forma se rechaza con `FOLIO_DE_OTRA_SERIE`, así que el formato
- * no es cosmético.
+ * El año sale de `anioEnGuatemala()`, no de `getFullYear()`: una tablet con otra
+ * zona horaria numeraría con el año equivocado la noche del 31 de diciembre.
  */
-function formatearFolio(serie: string, anio: number, correlativo: number): string {
-  return [
-    PREFIJO_FOLIO,
-    serie,
-    String(anio),
-    String(correlativo).padStart(6, '0'),
-  ].join('-')
+export function serieOficial(datos: {
+  esGuia: boolean
+  codigoAtraccion?: string
+  codigoOrigen?: string
+  codigoRecorrido?: string
+}): string {
+  if (!datos.esGuia && datos.codigoAtraccion === 'cuevas' && datos.codigoRecorrido) {
+    const origen = datos.codigoOrigen === 'extranjero' ? 'E' : 'N'
+    const recorrido = datos.codigoRecorrido === 'largo' ? 'L' : 'C'
+    return `${origen}R${recorrido}`
+  }
+  return `${PREFIJO_FOLIO}-${anioEnGuatemala()}`
+}
+
+/** `ERC` + 5 → `ERC-0005`; `TCK-2026` + 45 → `TCK-2026-000045`. */
+function formatearFolio(serie: string, numero: number): string {
+  const digitos = serie.startsWith(`${PREFIJO_FOLIO}-`) ? 6 : 4
+  return `${serie}-${String(numero).padStart(digitos, '0')}`
+}
+
+/** `ERC-0005` → `['ERC', 5]`; `TCK-2026-000045` → `['TCK-2026', 45]`. */
+function leerFolio(numeroTicket: string): [string, number] | null {
+  const m = /^([A-Z]+(?:-[0-9]{4})?)-([0-9]+)$/.exec(numeroTicket)
+  return m ? [m[1], Number(m[2])] : null
+}
+
+function fusionarCorrelativos(
+  a: Record<string, number> = {},
+  b: Record<string, number> = {},
+): Record<string, number> {
+  const fusion = { ...a }
+  for (const [serie, numero] of Object.entries(b)) {
+    fusion[serie] = Math.max(fusion[serie] ?? 0, numero)
+  }
+  return fusion
 }
 
 /**
- * Reserva `cantidad` folios consecutivos para esta taquilla y los devuelve.
+ * Anota números oficiales ya emitidos (en línea o al sincronizar) para que el
+ * próximo pase sin conexión no imprima uno que ya existe. Nunca baja un contador.
+ */
+export async function registrarFoliosOficiales(numeros: string[]): Promise<void> {
+  const vistos: Record<string, number> = {}
+  for (const numero of numeros) {
+    const leido = leerFolio(numero)
+    if (leido) vistos[leido[0]] = Math.max(vistos[leido[0]] ?? 0, leido[1])
+  }
+  if (Object.keys(vistos).length === 0) return
+
+  try {
+    await db.transaction('rw', db.identidadDispositivo, async () => {
+      const identidad = await db.identidadDispositivo.get('actual')
+      if (!identidad) return
+      await db.identidadDispositivo.put({
+        ...identidad,
+        correlativos: fusionarCorrelativos(identidad.correlativos, vistos),
+      })
+    })
+  } catch {
+    // Es una mejora de la adivinanza, no puede hacer fallar una venta ya cobrada:
+    // si el número choca, el servidor le asigna el siguiente al sincronizar.
+  }
+}
+
+/**
+ * Reserva un número oficial por cada serie pedida (una por pase) y los devuelve
+ * junto con el conteo propio de la taquilla.
+ *
+ * El número es el siguiente al último que conoce esta taquilla. Si mientras tanto
+ * otro equipo usó el mismo, el servidor lo resuelve al sincronizar: el primero
+ * que llega se lo queda y al otro le da el siguiente.
  *
  * Todo pasa dentro de una transacción de escritura a propósito: dos emisiones
  * que se solapen —el taquillero cobrando rápido, o una recarga a mitad de
- * venta— podrían leer el mismo correlativo y numerar dos ventas igual. Eso
- * llega al servidor como `FOLIO_YA_EMITIDO`, que es el rechazo más grave que
- * hay: dinero cobrado dos veces con un solo ticket posible.
- *
- * El correlativo se reinicia al cambiar de año, igual que el del servidor, que
- * lo lleva con único `[serie, anio]`.
- *
- * El año sale de `anioEnGuatemala()`, **no** de `getFullYear()`. El servidor lo
- * calcula en `America/Guatemala`, y si acá se leyera la zona del aparato los dos
- * dejarían de coincidir en la franja en que no cae el mismo día: el 31 de
- * diciembre a las 20:00 en Guatemala, una tablet con zona de Tokio numeraría con
- * el año siguiente. El servidor solo acepta el año en curso o el anterior — el
- * anterior porque una venta del 31 de diciembre puede subirse el 1 de enero —,
- * así que ese folio se rechaza con `FOLIO_DE_OTRA_SERIE`, y para entonces el
- * pase ya se imprimió y se cobró.
- *
- * Lo que esto **no** arregla: una tablet con la hora de verdad mal puesta sigue
- * numerando fuera de rango. La zona ya no importa; el instante sí.
+ * venta— podrían leer el mismo número y numerar dos ventas igual en este equipo,
+ * y eso llega al servidor como `FOLIO_YA_EMITIDO`.
  */
-export async function reservarFoliosLocales(cantidad: number): Promise<string[]> {
-  if (cantidad < 1) return []
+export async function reservarFoliosLocales(
+  series: string[],
+): Promise<{ numeroTicket: string; secuencia: number }[]> {
+  if (series.length === 0) return []
 
   return db.transaction('rw', db.identidadDispositivo, async () => {
     const identidad = await db.identidadDispositivo.get('actual')
@@ -280,18 +334,19 @@ export async function reservarFoliosLocales(cantidad: number): Promise<string[]>
       )
     }
 
-    const anio = anioEnGuatemala()
-    const base = identidad.anioCorrelativo === anio ? identidad.ultimoCorrelativo : 0
-
-    const folios: string[] = []
-    for (let i = 1; i <= cantidad; i++) {
-      folios.push(formatearFolio(identidad.serie, anio, base + i))
-    }
+    const correlativos = { ...(identidad.correlativos ?? {}) }
+    const folios = series.map((serie, i) => {
+      correlativos[serie] = (correlativos[serie] ?? 0) + 1
+      return {
+        numeroTicket: formatearFolio(serie, correlativos[serie]),
+        secuencia: identidad.ultimoCorrelativo + i + 1,
+      }
+    })
 
     await db.identidadDispositivo.put({
       ...identidad,
-      ultimoCorrelativo: base + cantidad,
-      anioCorrelativo: anio,
+      ultimoCorrelativo: identidad.ultimoCorrelativo + series.length,
+      correlativos,
     })
 
     return folios

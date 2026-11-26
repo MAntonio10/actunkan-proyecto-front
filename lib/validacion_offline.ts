@@ -1,3 +1,4 @@
+import { identidadActual } from '@/lib/dispositivo_taquilla'
 import { db } from '@/lib/db_tickets'
 import type { TicketBackend } from '@/tipos'
 import { formatearInstante } from '@/lib/fecha_guatemala'
@@ -25,9 +26,16 @@ export type ResultadoValidacionLocal =
 
 export async function validarSinConexion(
   numeroTicket: string,
+  dispositivo?: string,
 ): Promise<ResultadoValidacionLocal> {
   const folio = numeroTicket.trim()
   if (!folio) return { estado: 'desconocido' }
+
+  // Otra taquilla pudo imprimir el mismo número sin conexión: un pase ajeno no se
+  // puede confundir con una venta de este equipo.
+  if (dispositivo && dispositivo !== (await identidadActual())?.idDispositivo) {
+    return { estado: 'desconocido' }
+  }
 
   const venta = await db.ventasPendientes
     .filter(
@@ -37,7 +45,12 @@ export async function validarSinConexion(
 
   if (!venta) return { estado: 'desconocido' }
 
-  const ticket = await db.ticketsLocales.where('numeroTicket').equals(folio).first()
+  // El espejo local (id negativo), no un ticket del servidor que comparta número.
+  const ticket = await db.ticketsLocales
+    .where('numeroTicket')
+    .equals(folio)
+    .filter((t) => t.id < 0)
+    .first()
 
   /*
    * El sello se busca POR FOLIO, no por venta.

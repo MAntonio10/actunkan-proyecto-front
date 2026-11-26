@@ -6,6 +6,8 @@ import {
   reservarFoliosLocales,
   firmarFolio,
   armarQrFirmadoLocalmente,
+  registrarFoliosOficiales,
+  serieOficial,
 } from '@/lib/dispositivo_taquilla'
 import { refrescarEstado, sincronizar } from '@/lib/sincronizador_tickets'
 import type {
@@ -152,7 +154,15 @@ export async function emitirSinConexion(
     )
   }
 
-  const cantidadFolios = datos.requiereTicketGuia ? 2 : 1
+  // Una serie oficial por pase: la del visitante según atracción, origen y
+  // recorrido; la del guía, siempre TCK.
+  const datosSerie = {
+    codigoAtraccion: catalogos.atracciones.find((a) => a.id === payload.idAtraccion)?.codigo,
+    codigoOrigen: catalogos.origenes.find((o) => o.id === payload.idOrigen)?.codigo,
+    codigoRecorrido: catalogos.tiposRecorrido.find((t) => t.id === payload.idTipoRecorrido)?.codigo,
+  }
+  const series = [serieOficial({ ...datosSerie, esGuia: false })]
+  if (datos.requiereTicketGuia) series.push(serieOficial({ ...datosSerie, esGuia: true }))
 
   /*
    * La taquilla numera y firma sus propios folios. No hay inventario que se
@@ -172,7 +182,7 @@ export async function emitirSinConexion(
     )
   }
 
-  const folios: FolioReservado[] = await foliosFirmadosPorLaTaquilla(cantidadFolios)
+  const folios: FolioReservado[] = await foliosFirmadosPorLaTaquilla(series)
 
   const fechaEmision = new Date().toISOString()
   const idLocal = crypto.randomUUID()
@@ -196,6 +206,7 @@ export async function emitirSinConexion(
       // En modo lote van vacías y el servidor no las mira.
       firma: folios[0].firma,
       firmaGuia: datos.requiereTicketGuia ? folios[1]?.firma : undefined,
+      secuencia: folios[0].secuencia,
     }
     // `fechaUsoOffline` no se incluye: no forma parte del contrato publicado
     // (DOCUMENTACION_ENDPOINTS.md 18.3). El ingreso validado sin conexión se
@@ -243,11 +254,12 @@ export async function emitirSinConexion(
 }
 
 /** La taquilla numera y firma. No se puede quedar sin folios. */
-async function foliosFirmadosPorLaTaquilla(cantidad: number): Promise<FolioReservado[]> {
-  const numeros = await reservarFoliosLocales(cantidad)
+async function foliosFirmadosPorLaTaquilla(series: string[]): Promise<FolioReservado[]> {
+  const reservados = await reservarFoliosLocales(series)
   return Promise.all(
-    numeros.map(async (numeroTicket) => ({
+    reservados.map(async ({ numeroTicket, secuencia }) => ({
       numeroTicket,
+      secuencia,
       firma: await firmarFolio(numeroTicket),
       qr: await armarQrFirmadoLocalmente(numeroTicket),
     })),
@@ -416,6 +428,7 @@ export async function encolarDescartes(
     idLocal: venta.idLocal,
     numeroTicket: folio.numeroTicket,
     firma: folio.firma,
+    secuencia: folio.secuencia,
     // Si el espejo no tiene el ticket, el total va en el primer folio y 0 en el
     // resto: mejor declarar de menos en uno que contar el mismo dinero dos veces.
     montoCobrado:
@@ -543,6 +556,8 @@ export async function precargarGuias(): Promise<void> {
  *  el historial siga estando disponible cuando la red se caiga. */
 export async function espejarTicketsEmitidos(tickets: TicketBackend[]): Promise<void> {
   if (tickets.length === 0) return
+  // Lo que se vendió en línea también cuenta para el próximo número sin conexión.
+  await registrarFoliosOficiales(tickets.map((t) => t.numeroTicket))
   try {
     await db.ticketsLocales.bulkPut(tickets)
   } catch {

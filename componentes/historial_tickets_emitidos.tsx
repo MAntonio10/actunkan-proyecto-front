@@ -27,6 +27,7 @@ import {
   CloudOff,
   TriangleAlert,
   PauseCircle,
+  ScanLine,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,6 +59,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { EscanerQR } from "@/componentes/escaner_qr";
+import { leerQrPase } from "@/lib/leer_qr";
+import { identidadActual } from "@/lib/dispositivo_taquilla";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
@@ -337,6 +341,9 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
   const [infoPago, setInfoPago] = useState<RespuestaPagoTicket | null>(null);
   const [consultandoPago, setConsultandoPago] = useState(false);
 
+  const [escaneandoQr, setEscaneandoQr] = useState(false);
+  // La cámara emite el mismo QR muchas veces por segundo: se atiende solo el primero.
+  const qrEnCurso = useRef(false);
   const [busqueda, setBusqueda] = useState("");
   const [busquedaAplicada, setBusquedaAplicada] = useState("");
   const [filtroAtraccion, setFiltroAtraccion] = useState<string>(TODOS);
@@ -602,6 +609,50 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
     }
   }, []);
 
+  /**
+   * Busca el ticket real a partir del QR del papel. Si dos taquillas imprimieron
+   * el mismo número sin conexión, el servidor le dio a una el siguiente: el QR
+   * dice qué equipo lo emitió, y con eso se encuentra el que corresponde.
+   */
+  const buscarPorQr = useCallback(
+    async (texto: string) => {
+      if (qrEnCurso.current) return;
+      qrEnCurso.current = true;
+      setEscaneandoQr(false);
+
+      const { numeroTicket, dispositivo } = leerQrPase(texto);
+      const avisarSiDifiere = (t: TicketBackend) => {
+        if (t.numeroTicket !== numeroTicket) {
+          toast.info(`En el sistema este pase es ${t.numeroTicket}`, {
+            description: `El papel dice ${numeroTicket}: otro equipo ya había usado ese número.`,
+          });
+        }
+      };
+
+      // Una venta de esta taquilla que aún no sube solo está en este equipo.
+      const buscarLocal = async () => {
+        const propio = !dispositivo || dispositivo === (await identidadActual())?.idDispositivo;
+        return propio ? ticketsLocales.find((t) => t.numeroTicket === numeroTicket) : undefined;
+      };
+
+      try {
+        const ticket = await api.tickets.buscarPorQr(numeroTicket, dispositivo);
+        avisarSiDifiere(ticket);
+        abrirDetalle(ticket);
+      } catch (err: unknown) {
+        const local = await buscarLocal();
+        if (local) {
+          abrirDetalle(local);
+          return;
+        }
+        toast.error("No se encontró el ticket", {
+          description: err instanceof Error ? err.message : `No hay ticket para el QR ${numeroTicket}.`,
+        });
+      }
+    },
+    [abrirDetalle, ticketsLocales],
+  );
+
   const anular = useCallback(async () => {
     if (!ticketAAnular || anulandoId !== null) return;
     setAnulandoId(ticketAAnular.id);
@@ -702,6 +753,20 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                 className="pl-9 bg-muted/40 border-border/60 h-9 text-xs"
               />
             </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                qrEnCurso.current = false;
+                setEscaneandoQr(true);
+              }}
+              className="h-9 text-xs gap-1.5 shrink-0 cursor-pointer"
+            >
+              <ScanLine className="h-4 w-4" />
+              Buscar por QR
+            </Button>
 
             <Select
               value={filtroAtraccion}
@@ -825,7 +890,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                         const esAnulado = t.anulado === true || esPagoCancelado(t.estadoPago);
                         return (
                           <TableRow
-                            key={t.numeroTicket}
+                            key={t.id < 0 ? `local-${t.numeroTicket}` : t.numeroTicket}
                             className={cn(
                               esAnulado && "opacity-65 bg-destructive/[0.04] hover:bg-destructive/[0.08]",
                               // El borde punteado a la izquierda distingue la fila
@@ -995,7 +1060,7 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
                     const esAnulado = t.anulado === true || esPagoCancelado(t.estadoPago);
                     return (
                       <div
-                        key={t.numeroTicket}
+                        key={t.id < 0 ? `local-${t.numeroTicket}` : t.numeroTicket}
                         className={cn(
                           "p-4 rounded-xl border space-y-3 shadow-sm",
                           esAnulado && "opacity-70 bg-destructive/[0.04] border-destructive/30",
@@ -1183,6 +1248,23 @@ export function HistorialTicketsEmitidos({ catalogos, refrescarToken }: Props) {
           )}
         </CardContent>
       </Card>
+
+      {/* Búsqueda por QR: abre el detalle del ticket real. */}
+      <Dialog open={escaneandoQr} onOpenChange={setEscaneandoQr}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScanLine className="h-5 w-5 text-primary" />
+              Buscar ticket por QR
+            </DialogTitle>
+            <DialogDescription>
+              Apunte la cámara al código QR del pase. Se abre el ticket real aunque el número del
+              papel sea distinto al del sistema.
+            </DialogDescription>
+          </DialogHeader>
+          <EscanerQR activo={escaneandoQr} onDetectado={buscarPorQr} />
+        </DialogContent>
+      </Dialog>
 
       {/* Detalle del ticket: reutiliza el mismo pase que se ve al emitir, con
           servidor genera el PDF del pase aparte. */}

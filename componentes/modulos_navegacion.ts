@@ -8,6 +8,7 @@ import {
   ClipboardList,
   HandHeart,
   CloudCog,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 import { type ModuloMenu } from '@/tipos'
@@ -104,6 +105,15 @@ export const MODULOS_BACKEND: Record<string, ItemModulo> = {
     icono: History,
     iconoDesktop: History,
     ruta: '/bitacora',
+  },
+  Configuracion: {
+    id: 'configuracion',
+    nombre: 'Ajustes',
+    nombreLargo: 'Configuración y Ajustes',
+    descripcion: 'Correlativos de los tickets',
+    icono: Settings,
+    iconoDesktop: Settings,
+    ruta: '/configuracion',
   },
 }
 
