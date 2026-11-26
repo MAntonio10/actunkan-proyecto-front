@@ -93,10 +93,6 @@ import {
 import { formatearFechaApi } from '@/lib/fecha_guatemala'
 import { generarContrasena, hayAzarSeguro, LARGO_CONTRASENA } from '@/lib/generar_contrasena'
 
-/** Interruptor más grande para pantallas táctiles: el de shadcn mide 32×18 px. */
-const SWITCH_TACTIL =
-  'h-6 w-10 [&_[data-slot=switch-thumb]]:size-5'
-
 // --- ESQUEMAS ZOD ---
 const esquemaCrearUsuario = z.object({
   nombre: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
@@ -1701,7 +1697,6 @@ export default function ModuloUsuariosHubPage() {
                                   id={`select-all-${mod.id}`}
                                   checked={todosSeleccionados}
                                   onCheckedChange={(checked) => toggleTodosModulo(mod.id, checked)}
-                                  className={SWITCH_TACTIL}
                                 />
                               </Label>
                             )}
@@ -1745,7 +1740,6 @@ export default function ModuloUsuariosHubPage() {
                                       id={`permiso-${ma.id}`}
                                       checked={isChecked}
                                       onCheckedChange={(checked) => togglePermiso(ma, checked)}
-                                      className={SWITCH_TACTIL}
                                     />
                                   </label>
                                 )
